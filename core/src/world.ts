@@ -5,18 +5,7 @@
 import type { Seat, Spot } from "./games/gather.ts";
 import type { BoardRow, GameId } from "./games/types.ts";
 import { blockOf, doorOf, type GameMap, MAPS, type MapId, plotId, TOWN_SPAWN } from "./maps.ts";
-import {
-  type Door,
-  doorAt,
-  HQS,
-  OFFICES,
-  officeMap,
-  type Piece,
-  type Placed,
-  pieceOf,
-  STARTER_OFFICE,
-  setOffice,
-} from "./office.ts";
+import { type Door, doorAt, HQS, type Piece, pieceOf, withPieces } from "./office.ts";
 import { itemById } from "./shop.ts";
 
 export const TILE = 16;
@@ -53,10 +42,9 @@ export const companyOfRoom = (room: RoomId): number | null =>
 export const ownerOfOffice = (room: RoomId): number | null =>
   room.startsWith("office:") ? Number(room.slice(7)) : null;
 
-/** An office nobody has furnished yet holds `STARTER_OFFICE`; a building nobody has built is the bare floor. */
+/** Every office is the template (its furniture is its drops); a building nobody has built is the bare floor. */
 function baseMap(room: RoomId): GameMap {
-  const owner = ownerOfOffice(room);
-  if (owner !== null) return OFFICES.get(owner) ?? setOffice(owner, STARTER_OFFICE);
+  if (ownerOfOffice(room) !== null) return MAPS.office;
   const company = companyOfRoom(room);
   return company !== null ? (HQS.get(company) ?? MAPS.hq) : MAPS[room as MapId];
 }
@@ -74,7 +62,7 @@ export function mapOf(room: RoomId): GameMap {
     const piece = pieceOfDrop(d);
     return piece ? [{ ch: piece.ch, x: d.x, y: d.y }] : [];
   });
-  const map = pieces.length ? officeMap(pieces, base) : base;
+  const map = pieces.length ? withPieces(pieces, base) : base;
   dropped.set(room, { base, map });
   return map;
 }
@@ -92,7 +80,7 @@ export interface Drop {
   at: number;
 }
 
-/** What's on each room's floor. ponytail: one process holds every room's, like the offices. */
+/** What's on each room's floor. ponytail: one process holds every room's, like the town. */
 export const DROPS = new Map<RoomId, readonly Drop[]>();
 const dropped = new Map<RoomId, { base: GameMap; map: GameMap }>();
 
@@ -272,9 +260,8 @@ export interface Snapshot {
   houses: Houses;
   /** Games being played in town, with their tables or arenas. */
   games: WorldGame[];
-  /** Only in an office: its furniture, and whose it is (for the banner). */
-  furniture: Placed[] | null;
-  owner: { id: number; name: string } | null;
+  /** Only in an office: whose it is (for the banner), and whether it's open (for its owner's Menu). */
+  owner: { id: number; name: string; open: boolean } | null;
   /** Only in a building: its office doors, to build the map and draw the names. */
   doors: Door[];
   /** What's on the floor: furniture (in the map too) and parcels. */

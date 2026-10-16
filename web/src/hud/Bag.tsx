@@ -1,17 +1,19 @@
 import { itemById } from "@tokenmaxxing/core/shop.ts";
 import type { BagRow } from "@tokenmaxxing/server/registry";
 import { useEffect, useState } from "react";
+import { world } from "../game/world.ts";
 import { refreshMe, town } from "../net.ts";
 import { hud, useHud } from "../store.ts";
 import { ItemImage, WearButton } from "./Shop.tsx";
 import { Modal, useRun } from "./ui.tsx";
 
 /**
- * What I hold, one card per kind: how many, how many are in my office, Wear, and Drop (onto the floor
- * where I am). 🏅 is a level reward: it stays with me.
+ * What I hold, one card per kind: how many, Wear, and Drop (onto the floor where I am: in my own
+ * office, that's furnishing it). 🏅 is a level reward: it stays with me.
  */
 export function Bag() {
   const me = useHud((s) => s.me);
+  const inMyOffice = useHud((s) => s.room === `office:${world.selfId}`);
   const [bag, setBag] = useState<BagRow[] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const { error, run } = useRun();
@@ -51,11 +53,10 @@ export function Bag() {
                 {item.name}
                 <span className="muted"> ×{b.count}</span>
               </span>
-              {b.placed > 0 && <small className="muted">{b.placed} placed</small>}
               <WearButton item={item} look={me.look} run={run} />
-              {item.tradeable && b.count > b.placed && (
+              {item.tradeable && (
                 <button type="button" onClick={drop(item.id)}>
-                  Drop
+                  {inMyOffice ? "Drop here" : "Drop"}
                 </button>
               )}
             </li>

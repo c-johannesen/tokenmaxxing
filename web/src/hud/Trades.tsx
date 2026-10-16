@@ -13,7 +13,7 @@ const sideText = (s: Side): string =>
 /** Offering someone a trade, from their card: coins and items each way. */
 export function TradePanel({ userId }: { userId: number }) {
   const wallet = useHud((s) => s.wallet);
-  /** What I could give: my bag, less rewards and what's in my office. */
+  /** What I could give: my bag, less rewards. */
   const [mine, setMine] = useState<Record<string, number> | null>(null);
   const [them, setThem] = useState<{ name: string; owned: string[] } | null>(null);
   const [give, setGive] = useState<Side>({ coins: 0, items: [] });
@@ -28,13 +28,7 @@ export function TradePanel({ userId }: { userId: number }) {
         .bag()
         .then(
           (b) =>
-            setMine(
-              Object.fromEntries(
-                b
-                  .filter((r) => isTradeable(r.item) && r.count > r.placed)
-                  .map((r) => [r.item, r.count - r.placed]),
-              ),
-            ),
+            setMine(Object.fromEntries(b.filter((r) => isTradeable(r.item)).map((r) => [r.item, r.count]))),
           failed,
         );
       void town.tradeables(userId).then(setThem, failed);

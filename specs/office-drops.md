@@ -111,3 +111,24 @@ answers, the facing rule, and `seed` carrying drops. Net lines: fewer than today
 ## Open questions
 
 - None. The Inn's and buildings' 30-drop cap and the hour's expiry there are unchanged.
+
+## As built
+
+- `officeMap` stays, as `withPieces(pieces, base)`: `mapOf` writes a room's dropped furniture with it, and
+  the Shop draws a piece with it. `parseOffice`, `OFFICES` and `setOffice` are gone.
+- The world's only copy of the floors is `DROPS`. `onWake` asks `seed` every start: the floors and the
+  offices' open flags each time, everyone and every company only the first time.
+- The facing rule is `findSpot` searched from the faced tile, so "the nearest free tile" is the nearest to
+  that one. A TV, centred like a game table, covers the faced tile and the one to its left.
+- `placed(sql, drop)` takes the drop (it has the id); `floors(sql)` is `seed`'s query. `grantRewards`
+  returns the desk and chair, and `report` tells `world.placeDrops` after its transaction.
+- `takeOut` doesn't know the room yet: with five out elsewhere, you can't furnish either until one comes
+  back (`ponytail:`).
+- `setOfficeOpen` changes nothing for someone with no `offices` row: making one would mark their desk and
+  chair as given.
+- Rows on a floor from before `room` existed aren't in `seed`, so they're off the world's floors; the
+  sweeper sends them home within the hour. The migration logs
+  `[town] N offices: M pieces onto their floors, K into the bag`.
+- The restart test runs `town.seed` and `world.onWake` in the test process on an in-memory database: the
+  test server's world can't be restarted.
+- In your own office the Bag's button reads "Drop here".

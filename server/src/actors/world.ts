@@ -15,11 +15,8 @@ import {
   doorsFor,
   HQS,
   OFFICE_LEVEL,
-  OFFICES,
-  type Placed,
-  STARTER_OFFICE,
+  OFFICE_PIECES,
   setHq,
-  setOffice,
 } from "@tokenmaxxing/core/office.ts";
 import {
   CHAT_HISTORY,
@@ -28,6 +25,7 @@ import {
   companyOfRoom,
   cupsLeft,
   DIRS,
+  DROPS,
   type Drop,
   drinkCoffee,
   dropCovers,
@@ -105,10 +103,8 @@ interface WorldState {
   companies: Record<string, CompanyInfo>;
   /** Games on show in town. Optional: worlds from before games have none. */
   games?: Record<string, WorldGame>;
-  /** Saved offices, by owner (optional, like games). No entry is a new one: `officeOf`. */
+  /** Whether each office is open, by owner (optional, like games). No entry is open: `officeOf`. */
   offices?: Record<string, Office>;
-  /** What's on the floor, by id (optional, like games). Furniture is in its room's map too: `syncDrops`. */
-  drops?: Record<string, Drop>;
 }
 
 type ConnState = Caller & { joined?: boolean };
@@ -124,7 +120,7 @@ const COFFEE_LINES = [
   "☕☕☕☕☕☕ The machine refuses to make it any stronger. You vibrate anyway.",
 ];
 const CHAT_PER_MIN = 20;
-/** At most this many drops on one room's floor. */
+/** At most this many drops on one room's floor (an office holds `OFFICE_PIECES`). */
 const DROPS_PER_ROOM = 30;
 const REST_CHECK_EVERY = 10; // ticks
 /** Bots take a step every this many ticks: a stroll. */
@@ -212,20 +208,21 @@ export const world = actor({
   }),
   onCreate: (c) => requireMain(c),
   onWake: async (c) => {
-    // First start (or a wiped world): load everyone from `town` and put them to bed.
+    // Every floor, and every office's lock, are `town`'s: the world only keeps them in memory.
+    // ponytail: `seed` sends everyone every time, for the floors; split it if that gets big.
+    const seed = await main(c.client()).town.seed();
+    // First start (or a wiped world): everyone too, put to bed.
     if (!c.state.seeded) {
-      const seed = await main(c.client()).town.seed();
       for (const co of seed.companies) c.state.companies[co.id] = co;
       for (const p of seed.players) upsert(c.state, p, Date.now());
-      c.state.offices = seed.offices;
       c.state.seeded = true;
     }
+    c.state.offices = seed.offices;
+    delete (c.state as { drops?: unknown }).drops; // kept here before `seed` carried them
     placeBots(c.state);
     buildTown(c.state);
-    for (const [id, o] of Object.entries(c.state.offices ?? {})) setOffice(Number(id), o.furniture);
     for (const id of Object.keys(c.state.companies)) buildHq(c.state, Number(id));
-    for (const room of new Set(Object.values(c.state.drops ?? {}).map((d) => d.room)))
-      syncDrops(c.state, room);
+    for (const d of seed.drops) lay(c, d);
   },
   onDisconnect: (c, conn) => {
     const s = conn.state as ConnState;
@@ -368,7 +365,7 @@ export const world = actor({
       const map = mapOf(p.room);
       const [dx, dy] = DIRS[p.facing];
       const [fx, fy] = [p.x + dx, p.y + dy];
-      const here = dropsIn(c.state, p.room);
+      const here = dropsIn(p.room);
       const on = here.find((d) => dropCovers(d, p.x, p.y) && (p.state === "sit" || map.walkable(p.x, p.y)));
       const d =
         on ?? here.find((d) => dropCovers(d, fx, fy) && !map.walkable(fx, fy) && !map.kind(fx, fy).seat);
@@ -577,14 +574,13 @@ export const world = actor({
      */
     removePlayer: async (c, userId: number): Promise<number[]> => {
       requireInternal(c.conn.state);
-      const drops = Object.values(c.state.drops ?? {}).filter(
-        (d) => d.by === userId || d.room === `office:${userId}`,
-      );
+      const drops = [...DROPS.values()]
+        .flat()
+        .filter((d) => d.by === userId || d.room === `office:${userId}`);
       for (const d of drops) lift(c, d);
       const ids = drops.map((d) => d.id);
       // Their office goes too; anyone inside stays until they leave.
       delete c.state.offices?.[userId];
-      OFFICES.delete(userId);
       const p = c.state.players[userId];
       if (!p) return ids;
       sendToRoom(c, p.room, "moves", { room: p.room, join: [], m: [], leave: [userId] } satisfies Moves);
@@ -610,7 +606,7 @@ export const world = actor({
     removeCompany: async (c, id: number): Promise<number[]> => {
       requireInternal(c.conn.state);
       delete c.state.companies[id];
-      const drops = dropsIn(c.state, `hq:${id}`);
+      const drops = dropsIn(`hq:${id}`);
       for (const d of drops) lift(c, d);
       buildTown(c.state, c.vars.dirty);
       await rebuildHq(c, id);
@@ -618,17 +614,16 @@ export const world = actor({
       return drops.map((d) => d.id);
     },
 
-    /** From `town`: an office saved, opened or closed. Whoever is inside sees it; closing throws nobody out. */
-    setOffice: async (c, userId: number, furniture: Placed[], open: boolean): Promise<void> => {
+    /** From `town`: an office opened or closed. Whoever is inside sees it; closing throws nobody out. */
+    setOfficeOpen: async (c, userId: number, open: boolean): Promise<void> => {
       requireInternal(c.conn.state);
-      const opened = officeOf(c.state, userId).open !== open;
+      if (officeOf(c.state, userId).open === open) return;
       c.state.offices ??= {};
-      c.state.offices[userId] = { furniture, open };
-      setOffice(userId, furniture);
+      c.state.offices[userId] = { open };
       await resend(c, `office:${userId}`);
       // The 🔒 on their door.
       const companyId = c.state.players[userId]?.companyId;
-      if (opened && companyId != null) await resend(c, `hq:${companyId}`);
+      if (companyId != null) await resend(c, `hq:${companyId}`);
     },
 
     /** From `town`: a line for one player's open tabs (a company application, a trade, an answer). */
@@ -642,15 +637,16 @@ export const world = actor({
 
     /**
      * From `town`: an item on the floor of the room its dropper is in. A parcel goes on their tile, or the
-     * nearest free one; furniture on the nearest free floor tile that isn't a doorway or in front of one.
-     * ponytail: no reachability check, as in offices.
+     * nearest free one; furniture on the tile they face, or the nearest free floor tile to it, that isn't
+     * a doorway or in front of one.
+     * ponytail: no reachability check: you can wall off an office's entry; a visitor can still step out.
      */
     placeDrop: (c, { id, item, by }: { id: number; item: string; by: number }): Drop | { notice: string } => {
       requireInternal(c.conn.state);
       const p = c.state.players[by];
       const full = { notice: "There's no room on the floor here." };
-      const here = p ? dropsIn(c.state, p.room) : [];
-      if (!p || here.length >= DROPS_PER_ROOM) return full;
+      const here = p ? dropsIn(p.room) : [];
+      if (!p || here.length >= (ownerOfOffice(p.room) === null ? DROPS_PER_ROOM : OFFICE_PIECES)) return full;
       const map = mapOf(p.room);
       const piece = pieceOfDrop({ item });
       // One drop per tile; furniture lands on nobody, and not in anyone's way through a door.
@@ -665,20 +661,25 @@ export const world = actor({
         }
       }
       const games = p.room === "town" ? Object.values(c.state.games ?? {}).map((g) => g.spot) : [];
-      const spot = findSpot(map, [p.x, p.y], piece?.w ?? 1, 1, games, taken);
+      // Furniture: from the tile they face, so they choose where it goes.
+      const [ax, ay] = piece ? DIRS[p.facing] : [0, 0];
+      const spot = findSpot(map, [p.x + ax, p.y + ay], piece?.w ?? 1, 1, games, taken);
       if (!spot) return full;
       const drop: Drop = { id, item, room: p.room, ...spot, by, at: Date.now() };
       lay(c, drop);
       return drop;
     },
 
+    /** From `town`: drops already on a floor (an office's desk and chair, at level 10). */
+    placeDrops: (c, drops: Drop[]): void => {
+      requireInternal(c.conn.state);
+      for (const d of drops) lay(c, d);
+    },
+
     /** From `town`'s sweeper: drops gone back to their droppers. */
     removeDrops: (c, ids: number[]): void => {
       requireInternal(c.conn.state);
-      for (const id of ids) {
-        const d = c.state.drops?.[id];
-        if (d) lift(c, d);
-      }
+      for (const d of [...DROPS.values()].flat()) if (ids.includes(d.id)) lift(c, d);
     },
 
     /** From `player` after an ingest: offline players work at their desk while agents run. */
@@ -1040,35 +1041,33 @@ async function snapshot(
     chat: await chat,
     houses: self.room === "town" ? houses(s) : {},
     games: Object.values(s.games ?? {}),
-    furniture: owner === null ? null : officeOf(s, owner).furniture,
-    owner: owner === null ? null : { id: owner, name: s.players[owner]?.name ?? "Someone" },
+    owner:
+      owner === null
+        ? null
+        : { id: owner, name: s.players[owner]?.name ?? "Someone", open: officeOf(s, owner).open },
     doors: companyId === null ? [] : doorsOf(s, companyId),
-    drops: dropsIn(s, self.room),
+    drops: dropsIn(self.room),
   };
 }
 
-const dropsIn = (s: WorldState, room: RoomId): Drop[] =>
-  Object.values(s.drops ?? {}).filter((d) => d.room === room);
+/** What's on a room's floor. `DROPS` is the world's only copy: `town` has them all for a restart (`seed`). */
+const dropsIn = (room: RoomId): Drop[] => [...(DROPS.get(room) ?? [])];
 
-/** A room's drops into its map (`mapOf`): dropped seats seat, the coffee machine pours, the rest blocks. */
-const syncDrops = (s: WorldState, room: RoomId): void =>
-  setDrops(
-    room,
-    dropsIn(s, room).map((d) => ({ ...d })),
-  );
-
-/** Onto the floor: in its room's map, and the room sees it. */
+/**
+ * Onto the floor: in its room's map (`mapOf`: dropped seats seat, the coffee machine pours, the rest
+ * blocks), and the room sees it.
+ */
 function lay(c: Sender, d: Drop): void {
-  c.state.drops ??= {};
-  c.state.drops[d.id] = d;
-  syncDrops(c.state, d.room);
+  setDrops(d.room, [...dropsIn(d.room).filter((o) => o.id !== d.id), d]);
   sendToRoom(c, d.room, "drop", d);
 }
 
 /** Off the floor: out of the map, anyone sitting on it stands up there, and the room sees it go. */
 function lift(c: Sender & { vars: Vars }, d: Drop): void {
-  delete c.state.drops?.[d.id];
-  syncDrops(c.state, d.room);
+  setDrops(
+    d.room,
+    dropsIn(d.room).filter((o) => o.id !== d.id),
+  );
   for (const p of Object.values(c.state.players))
     if (p.room === d.room && p.state === "sit" && dropCovers(d, p.x, p.y)) {
       p.state = "idle";
@@ -1077,9 +1076,8 @@ function lift(c: Sender & { vars: Vars }, d: Drop): void {
   sendToRoom(c, d.room, "pickup", { id: d.id });
 }
 
-/** Someone's office; one never saved is new: `STARTER_OFFICE`, open. */
-const officeOf = (s: WorldState, userId: number): Office =>
-  s.offices?.[userId] ?? { furniture: [...STARTER_OFFICE], open: true };
+/** Someone's office; one `town` has no row for yet is open. */
+const officeOf = (s: WorldState, userId: number): Office => s.offices?.[userId] ?? { open: true };
 
 /** Everyone inside each company house, for drawing them through its walls from town. */
 function houses(s: WorldState): Houses {

@@ -1,6 +1,6 @@
 /**
- * Offices: the furniture you can buy, what it costs, and each owner's office map. The template
- * itself is `MAPS.office`, with the other rooms.
+ * Offices: the furniture you can buy, what it costs, and the doors to them. The template itself is
+ * `MAPS.office`, with the other rooms; what's in each office is what its owner dropped there.
  */
 import { GameMap, MAPS } from "./maps.ts";
 
@@ -26,6 +26,7 @@ export const FURNITURE: readonly Piece[] = [
   { ch: "s", name: "Sofa", price: 100 },
   { ch: "t", name: "TV", price: 120, w: 2 },
 ];
+/** At most this many drops on an office's floor. */
 export const OFFICE_PIECES = 40;
 /** Your own office opens at this level. */
 export const OFFICE_LEVEL = 10;
@@ -45,32 +46,10 @@ export const STARTER_OFFICE: readonly Placed[] = [
   { ch: "c", x: 5, y: 4 },
 ];
 
-/**
- * Null unless every piece is a known char on a floor tile, nothing overlaps, and it's under OFFICE_PIECES.
- * ponytail: no reachability check. You can wall off the entry tile; a visitor can still step back out.
- */
-export function parseOffice(raw: unknown): Placed[] | null {
-  if (!Array.isArray(raw) || raw.length > OFFICE_PIECES) return null;
-  const taken = new Set<string>();
-  const out: Placed[] = [];
-  for (const r of raw as Partial<Placed>[]) {
-    const piece = pieceOf(r?.ch);
-    const { x, y } = r ?? {};
-    if (!piece || !Number.isInteger(x) || !Number.isInteger(y)) return null;
-    for (let i = 0; i < (piece.w ?? 1); i++) {
-      const tile = `${x! + i},${y}`;
-      if (MAPS.office.at(x! + i, y!) !== "_" || taken.has(tile)) return null;
-      taken.add(tile);
-    }
-    out.push({ ch: piece.ch, x: x!, y: y! });
-  }
-  return out;
-}
-
-/** An office: the template with its owner's furniture written over the floor (or any room's map: drops). */
-export function officeMap(furniture: readonly Placed[], base = MAPS.office): GameMap {
+/** A map with these pieces written over its floor: a room's dropped furniture (`mapOf`). */
+export function withPieces(pieces: readonly Placed[], base: GameMap): GameMap {
   const rows = base.rows.map((r) => [...r]);
-  for (const p of furniture)
+  for (const p of pieces)
     for (let i = 0; i < (pieceOf(p.ch)?.w ?? 1); i++)
       if (base.contains(p.x + i, p.y)) rows[p.y - base.y0]![p.x + i - base.x0] = p.ch;
   return new GameMap(
@@ -80,15 +59,6 @@ export function officeMap(furniture: readonly Placed[], base = MAPS.office): Gam
     base.x0,
     base.y0,
   );
-}
-
-/** Each owner's office map. ponytail: one process holds every office it has seen, like the town. */
-export const OFFICES = new Map<number, GameMap>();
-
-export function setOffice(userId: number, furniture: readonly Placed[]): GameMap {
-  const map = officeMap(furniture);
-  OFFICES.set(userId, map);
-  return map;
 }
 
 // MARK: Doors
@@ -141,7 +111,7 @@ export function hqMap(doors: readonly Door[]): GameMap {
   );
 }
 
-/** Each company's building. ponytail: one process holds every building it has seen, like the offices. */
+/** Each company's building. ponytail: one process holds every building it has seen, like the town. */
 export const HQS = new Map<number, GameMap>();
 
 export function setHq(companyId: number, doors: readonly Door[]): GameMap {

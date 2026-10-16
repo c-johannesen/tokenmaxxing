@@ -275,8 +275,5 @@ export function interact(): void {
     if (company) return void hud.set({ panel: { kind: "companyCard", companyId: company.id } });
     return void hud.set({ dialog: b?.plot === null ? "The Inn. Beds for anyone without a company." : null });
   }
-  // Doors can't be faced (a step goes through), so your own office is furnished from its walls.
-  if (ch === "W" && world.room === `office:${world.selfId}`)
-    return void hud.set({ panel: { kind: "office" } });
   if (kind.text) hud.set({ dialog: kind.text });
 }

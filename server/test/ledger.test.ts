@@ -6,16 +6,17 @@ import {
   bag,
   balances,
   buy,
-  furnish,
   giveBack,
   grantRewards,
   heldIn,
   hold,
   pay,
   pickUp,
+  placed,
   refund,
   setBalance,
   settleTrade,
+  starterDrops,
   type Trade,
   takeOut,
   unclaimed,
@@ -147,6 +148,10 @@ describe("the coin ledger", () => {
   });
 });
 
+/** What's on the floor, oldest first. */
+const floor = () =>
+  sql.execute("SELECT item, dropped_by AS by, room, x, y FROM items WHERE owner_id IS NULL ORDER BY id");
+
 describe("the bag", () => {
   const sofa = itemById("furn.s")!;
   const placedSofa = { ch: "s", x: 1, y: 1 };
@@ -154,7 +159,7 @@ describe("the bag", () => {
   test("buying twice is two rows and one spend", async () => {
     await buy(sql, 1, itemById("glasses.1")!, NOW);
     await buy(sql, 1, itemById("glasses.1")!, NOW);
-    expect(await bag(sql, 1)).toEqual([{ item: "glasses.1", count: 2, placed: 0 }]);
+    expect(await bag(sql, 1)).toEqual([{ item: "glasses.1", count: 2 }]);
     expect(await sql.execute("SELECT item, price FROM purchases WHERE user_id = 1")).toEqual([
       { item: "glasses.1", price: 120 },
     ]);
@@ -162,32 +167,17 @@ describe("the bag", () => {
     await expect(buy(sql, 1, sofa, NOW)).rejects.toMatchObject({ code: "too_poor" });
   });
 
-  test("level rewards and the office's desk and chair come once", async () => {
-    await grantRewards(sql, 1, 10, NOW);
-    await grantRewards(sql, 1, 10, NOW);
-    expect(await bag(sql, 1)).toEqual([
-      { item: "furn.d", count: 1, placed: 1 },
-      { item: "furn.c", count: 1, placed: 1 },
-      { item: "hat.4", count: 1, placed: 0 },
-    ]);
+  test("level rewards come once; the office's desk and chair once, on its floor", async () => {
+    const drops = await grantRewards(sql, 1, 10, NOW);
+    expect(await grantRewards(sql, 1, 10, NOW)).toEqual([]);
+    expect(await starterDrops(sql, 1, NOW)).toEqual([]);
+    expect(await bag(sql, 1)).toEqual([{ item: "hat.4", count: 1 }]);
+    const desk = { item: "furn.d", by: 1, room: "office:1", x: 5, y: 3 };
+    const chair = { item: "furn.c", by: 1, room: "office:1", x: 5, y: 4 };
+    expect(await floor()).toEqual([desk, chair]);
+    expect(drops).toMatchObject([desk, chair]);
     await grantRewards(sql, 2, 9, NOW);
     expect(await bag(sql, 2)).toEqual([]);
-  });
-
-  test("furnishing places pieces from the bag, free, and no more than it holds", async () => {
-    await buy(sql, 1, sofa, NOW);
-    await furnish(sql, 1, [...STARTER_OFFICE, placedSofa], NOW); // a new office: its desk and chair come too
-    expect(await balance(1)).toBe(25);
-    expect(await bag(sql, 1)).toEqual([
-      { item: "furn.s", count: 1, placed: 1 },
-      { item: "furn.d", count: 1, placed: 1 },
-      { item: "furn.c", count: 1, placed: 1 },
-    ]);
-    await expect(furnish(sql, 1, [placedSofa, { ...placedSofa, y: 2 }], NOW)).rejects.toThrow("None left");
-    // Throwing everything out puts it back in the bag.
-    await furnish(sql, 1, [], NOW);
-    expect((await bag(sql, 1)).map((b) => b.placed)).toEqual([0, 0, 0]);
-    expect(await balance(1)).toBe(25);
   });
 
   test("the backfill turns purchases and office pieces into rows, once", async () => {
@@ -200,19 +190,38 @@ describe("the bag", () => {
     );
     await migrate(sql);
     await migrate(sql);
-    expect(await bag(sql, 2)).toEqual([
-      { item: "hat.1", count: 1, placed: 0 },
-      { item: "furn.d", count: 1, placed: 1 },
-      { item: "furn.c", count: 1, placed: 1 },
-      { item: "furn.s", count: 1, placed: 1 },
-    ]);
-    expect(await bag(sql, 3)).toEqual([{ item: "glasses.1", count: 1, placed: 0 }]);
+    // ...and the office pieces onto its floor (below).
+    expect(await bag(sql, 2)).toEqual([{ item: "hat.1", count: 1 }]);
+    expect(await floor()).toHaveLength(3);
+    expect(await bag(sql, 3)).toEqual([{ item: "glasses.1", count: 1 }]);
     expect(await balance(2)).toBe(75 - 100);
     // Every item gone (traded to someone deleted, say): the next start doesn't hand them out again.
     await sql.execute("DELETE FROM items");
     await migrate(sql);
     expect(await bag(sql, 2)).toEqual([]);
     expect(await bag(sql, 3)).toEqual([]);
+  });
+
+  test("an office's saved pieces go onto its floor where they stood, once; spare placed rows into the bag", async () => {
+    for (const item of ["furn.d", "furn.c", "furn.s", "furn.s"])
+      await sql.execute("INSERT INTO items (owner_id, item, at, placed) VALUES (1, ?, 5, 1)", item);
+    await sql.execute(
+      "INSERT INTO offices (user_id, furniture, updated_at) VALUES (1, ?, 7)",
+      JSON.stringify([...STARTER_OFFICE, placedSofa]),
+    );
+    await migrate(sql);
+    await migrate(sql);
+    const own = { by: 1, room: "office:1" };
+    expect(await floor()).toEqual([
+      { item: "furn.d", ...own, x: 5, y: 3 },
+      { item: "furn.c", ...own, x: 5, y: 4 },
+      { item: "furn.s", ...own, x: 1, y: 1 },
+    ]);
+    expect(await sql.execute("SELECT DISTINCT dropped_at AS at FROM items WHERE owner_id IS NULL")).toEqual([
+      { at: 7 },
+    ]);
+    expect(await bag(sql, 1)).toEqual([{ item: "furn.s", count: 1 }]);
+    expect(await sql.execute("SELECT furniture FROM offices")).toEqual([{ furniture: "[]" }]);
   });
 });
 
@@ -228,10 +237,31 @@ describe("drops", () => {
     expect(await unclaimed(sql, NOW - HOUR)).toEqual([old]);
     await giveBack(sql, [old]);
     expect(await pickUp(sql, old, 2)).toBe(false);
-    expect(await bag(sql, 1)).toEqual([{ item: "glasses.1", count: 1, placed: 0 }]);
+    expect(await bag(sql, 1)).toEqual([{ item: "glasses.1", count: 1 }]);
     expect(await pickUp(sql, fresh, 2)).toBe(true);
-    expect(await bag(sql, 2)).toEqual([{ item: "glasses.1", count: 1, placed: 0 }]);
+    expect(await bag(sql, 2)).toEqual([{ item: "glasses.1", count: 1 }]);
     expect(await unclaimed(sql, NOW)).toEqual([]);
+  });
+
+  /** One of `item` bought by `userId` and dropped in `room` at `at`. */
+  async function dropIn(userId: number, item: string, room: `office:${number}` | "inn", at = NOW) {
+    await sql.execute("INSERT INTO items (owner_id, item, at) VALUES (?, ?, ?)", userId, item, at);
+    const id = await takeOut(sql, userId, item, at);
+    await placed(sql, { id, item, room, x: 1, y: 1, by: userId, at });
+    return id;
+  }
+
+  test("furniture in your own office isn't loot: no cap, never swept; a visitor's gift there goes home", async () => {
+    for (let i = 0; i < 6; i++) await dropIn(1, "furn.=", "office:1", NOW - 2 * HOUR);
+    const gift = await dropIn(2, "furn.p", "office:1", NOW - 2 * HOUR);
+    expect(await unclaimed(sql, NOW - HOUR)).toEqual([gift]);
+    for (let i = 0; i < 5; i++) await dropIn(1, "furn.=", "inn");
+    await expect(dropIn(1, "furn.=", "inn")).rejects.toMatchObject({ code: "too_many" });
+    // Picked up, it's off the floor: back down, it's somewhere new.
+    expect(await pickUp(sql, gift, 1)).toBe(true);
+    expect(await sql.execute("SELECT room, x, y FROM items WHERE id = ?", gift)).toEqual([
+      { room: null, x: null, y: null },
+    ]);
   });
 
   test("a deleted dropper's drop is gone, not given back", async () => {
@@ -341,12 +371,12 @@ describe("trades", () => {
     expect(await sumOf(`trade:1:${NOW}`)).toBeNull();
   });
 
-  test("a placed piece can't be traded until it's back in the bag", async () => {
+  test("a piece on the floor can't be traded until it's picked up", async () => {
     await buy(sql, 1, itemById("furn.s")!, NOW);
-    await furnish(sql, 1, [{ ch: "s", x: 1, y: 1 }], NOW);
+    const id = await takeOut(sql, 1, "furn.s", NOW);
     const offer = trade({ give: { coins: 0, items: ["furn.s"] } });
     await expect(settleTrade(sql, offer, NOW)).rejects.toMatchObject({ code: "not_owned" });
-    await furnish(sql, 1, [], NOW);
+    await pickUp(sql, id, 1);
     await settleTrade(sql, offer, NOW);
     expect((await wallet(sql, 2, NOW)).owned).toEqual(["furn.s"]);
   });
