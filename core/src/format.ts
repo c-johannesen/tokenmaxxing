@@ -12,27 +12,46 @@ const LEVEL_TITLES = [
   "Petamaxxer",
   "Datacenter Tycoon",
   "Compute Overlord",
+  "Examaxxer",
+  "Rate Limit Survivor",
+  "Cluster Captain",
+  "GPU Hoarder",
+  "Zettamaxxer",
+  "Inference Warlord",
+  "Hyperscaler",
+  "Yottamaxxer",
+  "Benchmark Breaker",
+  "Transformer Tamer",
+  "Foundation Model",
+  "Frontier Lab",
+  "Planetary Compute",
+  "Dyson Sphere",
+  "AGI Candidate",
+  "Superintelligence",
+  "Event Horizon",
   "Singularity",
 ];
 
-/**
- * Half-decade steps from 1M lifetime tokens (1M → L1, 10M → L3, 100M → L5, 1B → L7, 10B → L9),
- * eighth-decade steps from 10B to Singularity at 31.6B (L13), then half-decade steps again.
- */
-export function levelFor(tokens: number): number {
-  if (tokens < 1e6) return 0;
-  const decades = Math.log10(tokens / 1e6);
-  if (decades < 4) return Math.floor(2 * decades) + 1;
-  if (decades < 4.5) return Math.floor(8 * decades) - 23;
-  return Math.floor(2 * decades) + 4;
-}
+/** Lifetime tokens where each level starts; the index is the level. About ×3 a level to 10B, then 1B a level. */
+const LEVELS = [
+  0,
+  1e6,
+  3e6,
+  10e6,
+  30e6,
+  100e6,
+  300e6,
+  1e9,
+  3e9,
+  6e9,
+  ...Array.from({ length: 21 }, (_, i) => (10 + i) * 1e9),
+];
+export const MAX_LEVEL = LEVELS.length - 1;
 
-/** Lifetime tokens where a level starts, the inverse of levelFor. */
-export function levelAt(level: number): number {
-  if (level < 1) return 0;
-  const decades = level <= 9 ? (level - 1) / 2 : level <= 13 ? (level + 23) / 8 : (level - 4) / 2;
-  return Math.ceil(1e6 * 10 ** decades);
-}
+export const levelFor = (tokens: number): number => LEVELS.findLastIndex((at) => tokens >= at);
+
+/** Infinity past the top, so "next level" maths can't divide by zero. */
+export const levelAt = (level: number): number => LEVELS[level] ?? Infinity;
 
 export const levelTitle = (level: number): string => LEVEL_TITLES[Math.min(level, LEVEL_TITLES.length - 1)]!;
 

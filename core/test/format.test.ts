@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 import {
   clock,
-  compact,
   hoursText,
   levelAt,
   levelFor,
@@ -26,15 +25,18 @@ test("clocks, durations and plurals", () => {
   expect(plural(2, "PR")).toBe("2 PRs");
 });
 
-test("levelAt is where levelFor ticks over", () => {
+test("levelAt is where levelFor ticks over, up to Singularity at 30", () => {
   expect(levelAt(0)).toBe(0);
   expect(levelAt(1)).toBe(1e6);
   expect(levelAt(7)).toBe(1e9);
-  expect(levelAt(9)).toBe(1e10);
-  expect(compact(levelAt(13))).toBe("31.6B");
-  expect(levelTitle(13)).toBe("Singularity");
-  expect(levelAt(14)).toBe(1e11);
-  for (let level = 1; level <= 16; level++) {
+  expect(levelAt(10)).toBe(10e9);
+  expect(levelAt(30)).toBe(30e9);
+  expect(levelAt(31)).toBe(Infinity);
+  expect(levelFor(31e9)).toBe(30);
+  expect(levelTitle(13)).toBe("Examaxxer");
+  expect(levelTitle(30)).toBe("Singularity");
+  expect(levelTitle(99)).toBe("Singularity");
+  for (let level = 1; level <= 30; level++) {
     expect(levelFor(levelAt(level))).toBe(level);
     expect(levelFor(levelAt(level) - 1)).toBe(level - 1);
   }

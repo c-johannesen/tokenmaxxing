@@ -210,6 +210,8 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 - Balances aren't stored: they're worked out from `usage_daily` minus `purchases`, so a late sync still pays.
 - The catalogue (`core/src/shop.ts`): 4 outfits, 3 glasses, 3 hats and 5 pets, 60 to 1,500 coins. Items are
   worn through `Look` (`outfit` ≥ 8, `glasses`, `hat`, `pet`). Pets follow their owner in the client.
+- Three items are earned, not bought: a top hat, server-rack armour and a Singularity orb, owned from levels 10,
+  20 and 30. Like balances, that's worked out from usage (lifetime tokens), so there's nothing to claim.
 
 ## Games
 
