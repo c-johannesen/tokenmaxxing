@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { frontier, plotId } from "@tokenmaxxing/core/maps.ts";
-import { STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
 import type { Notice } from "@tokenmaxxing/core/world.ts";
-import { admin, admit, as, client, event, eventually, MIN, rich, signUp, veteran } from "./rivet.ts";
+import { admin, admit, as, client, event, eventually, MIN, rich, signUp } from "./rivet.ts";
 
 describe("accounts", () => {
   test("names are unique and validated", async () => {
@@ -259,7 +258,7 @@ describe("coins and the shop", () => {
     expect(after.balance).toBe(70);
     expect(after.owned).toEqual(["glasses.1"]);
     expect((await a.town.buy("glasses.1")).balance).toBe(10);
-    expect(await a.town.bag()).toEqual([{ item: "glasses.1", count: 2, placed: 0 }]);
+    expect(await a.town.bag()).toEqual([{ item: "glasses.1", count: 2 }]);
     await expect(a.town.buy("glasses.1")).rejects.toThrow("coins");
     await expect(a.town.buy("nope")).rejects.toThrow();
     await a.town.setLook({ ...(await a.town.me()).look, glasses: 1 });
@@ -278,7 +277,7 @@ describe("coins and the shop", () => {
         ),
       );
     expect((await a.town.profile(a.userId, "all")).level).toBe(10);
-    expect(await a.town.bag()).toContainEqual({ item: "hat.4", count: 1, placed: 0 });
+    expect(await a.town.bag()).toContainEqual({ item: "hat.4", count: 1 });
     await a.town.setLook({ ...(await a.town.me()).look, hat: 4 });
     expect((await a.town.me()).look.hat).toBe(4);
     await expect(a.town.buy("hat.4")).rejects.toMatchObject({ code: "not_for_sale" });
@@ -306,7 +305,7 @@ describe("drops", () => {
     await expect(a.town.drop("hat.1")).rejects.toMatchObject({ code: "not_owned" });
     for (let i = 0; i < 4; i++) await a.town.drop("furn.=");
     await expect(a.town.drop("furn.=")).rejects.toMatchObject({ code: "too_many" });
-    expect(await a.town.bag()).toEqual([{ item: "furn.=", count: 1, placed: 0 }]);
+    expect(await a.town.bag()).toEqual([{ item: "furn.=", count: 1 }]);
   });
 });
 
@@ -401,31 +400,6 @@ describe("trades", () => {
 });
 
 describe("offices", () => {
-  test("from level 10, in a company; pieces come from the bag, free", async () => {
-    const sofa = { ch: "s", x: 1, y: 1 };
-    const low = await signUp("office");
-    await low.town.createCompany("Ground Floor");
-    await expect(low.town.setOffice([...STARTER_OFFICE])).rejects.toThrow("level 10");
-    const freelancer = await signUp("office");
-    await veteran(freelancer);
-    await expect(freelancer.town.setOffice([...STARTER_OFFICE])).rejects.toThrow("company");
-
-    const a = await signUp("office");
-    await a.town.createCompany("Top Floor");
-    await veteran(a);
-    await admin().adminSetCoins(a.userId, 150);
-    await expect(a.town.setOffice([{ ch: "s", x: 0, y: 1 }])).rejects.toThrow("fit"); // the wall
-    await expect(a.town.setOffice([...STARTER_OFFICE, sofa])).rejects.toThrow("None left");
-    expect((await a.town.buy("furn.s")).balance).toBe(50);
-    await expect(a.town.setOffice([...STARTER_OFFICE, sofa, { ...sofa, y: 2 }])).rejects.toThrow("None left");
-    await a.town.setOffice([...STARTER_OFFICE, sofa]);
-    expect((await a.town.wallet()).balance).toBe(50);
-    expect(await a.town.bag()).toContainEqual({ item: "furn.s", count: 1, placed: 1 });
-    expect(await a.town.office()).toMatchObject({ furniture: [...STARTER_OFFICE, sofa], open: true });
-    // Bought, not held like a stake: the account can still be deleted.
-    await admin().adminDeleteUser(a.userId);
-  });
-
   test("thirty changes a minute: each one sends the office and its building to everyone in them", async () => {
     const a = await signUp("office");
     for (let i = 0; i < 30; i++) await a.town.setOfficeOpen(i % 2 === 0);

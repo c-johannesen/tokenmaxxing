@@ -1,4 +1,4 @@
-import { FURNITURE, OFFICE_LEVEL, type Placed, STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
+import { OFFICE_LEVEL, STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
 import { type DayFacts, EMPTY_DAY, QUESTS, questCoins } from "@tokenmaxxing/core/quests.ts";
 import { addDays, dayKey } from "@tokenmaxxing/core/range.ts";
 import {
@@ -11,6 +11,7 @@ import {
   PODIUM_COINS,
   type Side,
 } from "@tokenmaxxing/core/shop.ts";
+import type { Drop } from "@tokenmaxxing/core/world.ts";
 import { UserError } from "rivetkit";
 import { all, one, type Sql, type TxSql } from "../actors/shared.ts";
 import { lookOf, TOKENS, userById } from "./users.ts";
@@ -21,40 +22,41 @@ export interface Wallet {
   today: number;
   /** Days finished in the top 3, newest first (the last 30 days). */
   wins: { day: string; place: number; coins: number }[];
-  /** Item ids I hold out of my office, one of each kind: what I can wear or trade. */
+  /** Item ids I hold, one of each kind: what I can wear or trade. */
   owned: string[];
   /** Today's quests, and which are done so far. */
   quests: { id: string; text: string; coins: number; done: boolean }[];
 }
 
-/** Item ids `userId` holds and could wear or trade: one of each kind, placed furniture left out. */
+/** Item ids `userId` holds and could wear or trade: one of each kind. */
 export const ownedItems = async (sql: Sql, userId: number): Promise<string[]> =>
   (
     await all<{ item: string }>(
       sql,
-      "SELECT item FROM items WHERE owner_id = ? AND placed = 0 GROUP BY item ORDER BY MIN(id)",
+      "SELECT item FROM items WHERE owner_id = ? GROUP BY item ORDER BY MIN(id)",
       userId,
     )
   ).map((r) => r.item);
 
-/** One kind in a bag: how many, and how many of those are in the office. */
+/** One kind in a bag, and how many. */
 export interface BagRow {
   item: string;
   count: number;
-  placed: number;
 }
 
 export const bag = (sql: Sql, userId: number): Promise<BagRow[]> =>
   all<BagRow>(
     sql,
-    `SELECT item, COUNT(*) AS count, SUM(placed) AS placed FROM items WHERE owner_id = ?
-     GROUP BY item ORDER BY MIN(id)`,
+    "SELECT item, COUNT(*) AS count FROM items WHERE owner_id = ? GROUP BY item ORDER BY MIN(id)",
     userId,
   );
 
-/** Hands out what `level` has reached, each once: the level rewards, and the office's desk and chair. */
-export async function grantRewards(sql: Sql, userId: number, level: number, now: number): Promise<void> {
-  if (level >= OFFICE_LEVEL) await starterOffice(sql, userId, now);
+/**
+ * Hands out what `level` has reached, each once: the level rewards, and the office's desk and chair.
+ * Returns the desk and chair the first time, for `world` to put down.
+ */
+export async function grantRewards(sql: Sql, userId: number, level: number, now: number): Promise<Drop[]> {
+  const drops = level >= OFFICE_LEVEL ? await starterDrops(sql, userId, now) : [];
   for (const i of levelItems(level)) {
     const [fresh] = await all(
       sql,
@@ -65,6 +67,7 @@ export async function grantRewards(sql: Sql, userId: number, level: number, now:
     if (fresh)
       await sql.execute("INSERT INTO items (owner_id, item, at) VALUES (?, ?, ?)", userId, i.id, now);
   }
+  return drops;
 }
 
 /**
@@ -247,78 +250,55 @@ export async function buy(sql: Sql, userId: number, item: Item, now: number): Pr
 }
 
 export interface Office {
-  furniture: Placed[];
   open: boolean;
 }
 
-/** Every saved office (or only `userId`'s), by owner. */
+/** Every office (or only `userId`'s), by owner. */
 export async function offices(sql: Sql, userId: number | null = null): Promise<Record<number, Office>> {
-  const rows = await all<{ userId: number; furniture: string; open: number }>(
+  const rows = await all<{ userId: number; open: number }>(
     sql,
-    "SELECT user_id AS userId, furniture, open FROM offices WHERE ? IS NULL OR user_id = ?",
+    "SELECT user_id AS userId, open FROM offices WHERE ? IS NULL OR user_id = ?",
     userId,
     userId,
   );
-  return Object.fromEntries(
-    rows.map((r) => [r.userId, { furniture: JSON.parse(r.furniture), open: !!r.open }]),
-  );
+  return Object.fromEntries(rows.map((r) => [r.userId, { open: !!r.open }]));
 }
 
-/** Someone's office; one that was never saved is new: `STARTER_OFFICE`, open. */
+/** Someone's office; one with no row yet is open. */
 export const officeOf = async (sql: Sql, userId: number): Promise<Office> =>
-  (await offices(sql, userId))[userId] ?? { furniture: [...STARTER_OFFICE], open: true };
+  (await offices(sql, userId))[userId] ?? { open: true };
 
 /**
- * A never-saved office holds `STARTER_OFFICE`. The first time it's saved or opened or closed, that
- * becomes its row, and the desk and chair placed rows in the bag, free as they always were.
+ * A new office's desk and chair, free: two rows already on its floor at the `STARTER_OFFICE` tiles,
+ * dropped by its owner. Once: the `offices` row says they came. Returns them, for `world`.
  */
-export async function starterOffice(sql: Sql, userId: number, now: number): Promise<void> {
+export async function starterDrops(sql: Sql, userId: number, now: number): Promise<Drop[]> {
   const [made] = await all(
     sql,
-    "INSERT INTO offices (user_id, furniture, updated_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING RETURNING user_id",
+    "INSERT INTO offices (user_id, furniture, updated_at) VALUES (?, '[]', ?) ON CONFLICT DO NOTHING RETURNING user_id",
     userId,
-    JSON.stringify(STARTER_OFFICE),
     now,
   );
-  if (made)
-    for (const p of STARTER_OFFICE)
-      await sql.execute(
-        "INSERT INTO items (owner_id, item, at, placed) VALUES (?, ?, ?, 1)",
-        userId,
-        `furn.${p.ch}`,
-        now,
-      );
-}
-
-/**
- * Saves `userId`'s furniture from their bag: as many of each kind as they hold (placed or not) can
- * go in, those rows are placed and the rest are back in the bag. Placing is free; buying costs.
- * Run it serialized, like `buy`.
- */
-export async function furnish(sql: TxSql, userId: number, furniture: Placed[], now: number): Promise<void> {
-  await sql.transaction(async (tx) => {
-    await starterOffice(tx, userId, now);
-    const held = new Map((await bag(tx, userId)).map((b) => [b.item, b.count]));
-    const count = (ch: string) => furniture.filter((p) => p.ch === ch).length;
-    for (const f of FURNITURE)
-      if (count(f.ch) > (held.get(`furn.${f.ch}`) ?? 0))
-        throw new UserError(`None left in your bag: buy another ${f.name} first.`, { code: "not_owned" });
-    await tx.execute("UPDATE items SET placed = 0 WHERE owner_id = ? AND placed = 1", userId);
-    for (const f of FURNITURE)
-      if (count(f.ch) > 0)
-        await tx.execute(
-          "UPDATE items SET placed = 1 WHERE id IN (SELECT id FROM items WHERE owner_id = ? AND item = ? LIMIT ?)",
-          userId,
-          `furn.${f.ch}`,
-          count(f.ch),
-        );
-    await tx.execute(
-      "UPDATE offices SET furniture = ?, updated_at = ? WHERE user_id = ?",
-      JSON.stringify(furniture),
+  if (!made) return [];
+  const room = `office:${userId}` as const;
+  const drops: Drop[] = [];
+  for (const { ch, x, y } of STARTER_OFFICE) {
+    const item = `furn.${ch}`;
+    const [row] = await all<{ id: number }>(
+      sql,
+      `INSERT INTO items (owner_id, item, at, dropped_by, dropped_at, room, x, y)
+       VALUES (NULL, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+      item,
       now,
       userId,
+      now,
+      room,
+      x,
+      y,
     );
-  });
+    drops.push({ id: row!.id, item, room, x, y, by: userId, at: now });
+  }
+  return drops;
 }
 
 // MARK: The ledger: coins moving between players
@@ -494,7 +474,7 @@ export async function settleTrade(sql: TxSql, t: Trade, now: number): Promise<vo
       for (const id of d.side.items)
         await tx.execute(
           `UPDATE items SET owner_id = ? WHERE id =
-             (SELECT id FROM items WHERE owner_id = ? AND item = ? AND placed = 0 LIMIT 1)`,
+             (SELECT id FROM items WHERE owner_id = ? AND item = ? LIMIT 1)`,
           d.receiverId,
           d.giverId,
           id,
@@ -519,14 +499,17 @@ export const DROPS_PER_PERSON = 5;
 
 /**
  * Takes one `item` out of `userId`'s bag for the floor (`owner_id` NULL, with who and when): not a
- * reward, not a placed piece, and not past `DROPS_PER_PERSON`. Returns the row's id. Run it serialized,
- * like `buy`.
+ * reward, and not past `DROPS_PER_PERSON` (what's in their own office is furniture, not counted).
+ * Returns the row's id. Run it serialized, like `buy`.
+ * ponytail: with five out elsewhere, furnishing waits too (the room isn't known yet). Count after
+ * `placeDrop` answers if anyone minds.
  */
 export async function takeOut(sql: Sql, userId: number, item: unknown, now: number): Promise<number> {
   if (!isTradeable(item)) throw new UserError("That one stays with you.", { code: "not_tradeable" });
   const [{ n }] = (await all<{ n: number }>(
     sql,
-    "SELECT COUNT(*) AS n FROM items WHERE dropped_by = ? AND owner_id IS NULL",
+    "SELECT COUNT(*) AS n FROM items WHERE dropped_by = ? AND owner_id IS NULL AND room IS NOT 'office:' || ?",
+    userId,
     userId,
   )) as [{ n: number }];
   if (n >= DROPS_PER_PERSON)
@@ -536,7 +519,7 @@ export async function takeOut(sql: Sql, userId: number, item: unknown, now: numb
   const [row] = await all<{ id: number }>(
     sql,
     `UPDATE items SET owner_id = NULL, dropped_by = ?, dropped_at = ? WHERE id =
-       (SELECT id FROM items WHERE owner_id = ? AND item = ? AND placed = 0 LIMIT 1) RETURNING id`,
+       (SELECT id FROM items WHERE owner_id = ? AND item = ? LIMIT 1) RETURNING id`,
     userId,
     now,
     userId,
@@ -546,12 +529,26 @@ export async function takeOut(sql: Sql, userId: number, item: unknown, now: numb
   return row.id;
 }
 
+/** Where `world` put a drop down, so a restarted `world` finds it there (`seed`). Not if it's gone already. */
+export async function placed(sql: Sql, d: Drop): Promise<void> {
+  await sql.execute(
+    "UPDATE items SET room = ?, x = ?, y = ? WHERE id = ? AND owner_id IS NULL",
+    d.room,
+    d.x,
+    d.y,
+    d.id,
+  );
+}
+
+/** Off the floor, from the town's side. */
+const OFF_FLOOR = "dropped_by = NULL, dropped_at = NULL, room = NULL, x = NULL, y = NULL";
+
 /** A drop into `userId`'s bag. False if it isn't on the floor any more (the sweeper sent it home). */
 export const pickUp = async (sql: Sql, id: number, userId: number): Promise<boolean> =>
   (
     await all(
       sql,
-      "UPDATE items SET owner_id = ?, dropped_by = NULL, dropped_at = NULL WHERE id = ? AND owner_id IS NULL RETURNING id",
+      `UPDATE items SET owner_id = ?, ${OFF_FLOOR} WHERE id = ? AND owner_id IS NULL RETURNING id`,
       userId,
       id,
     )
@@ -562,14 +559,23 @@ export async function giveBack(sql: Sql, ids: number[]): Promise<void> {
   const list = JSON.stringify(ids);
   const mine = "owner_id IS NULL AND id IN (SELECT value FROM json_each(?))";
   await sql.execute(`DELETE FROM items WHERE ${mine} AND dropped_by NOT IN (SELECT id FROM users)`, list);
-  await sql.execute(
-    `UPDATE items SET owner_id = dropped_by, dropped_by = NULL, dropped_at = NULL WHERE ${mine}`,
-    list,
-  );
+  await sql.execute(`UPDATE items SET owner_id = dropped_by, ${OFF_FLOOR} WHERE ${mine}`, list);
 }
 
-/** Drops on the floor since before `before`, for the sweeper. */
+/** Drops on the floor since before `before`, for the sweeper: not furniture in its dropper's own office. */
 export const unclaimed = async (sql: Sql, before: number): Promise<number[]> =>
   (
-    await all<{ id: number }>(sql, "SELECT id FROM items WHERE owner_id IS NULL AND dropped_at < ?", before)
+    await all<{ id: number }>(
+      sql,
+      "SELECT id FROM items WHERE owner_id IS NULL AND dropped_at < ? AND room IS NOT 'office:' || dropped_by",
+      before,
+    )
   ).map((r) => r.id);
+
+/** Everything on a floor, for `world` starting up (`seed`). */
+export const floors = (sql: Sql): Promise<Drop[]> =>
+  all<Drop>(
+    sql,
+    `SELECT id, item, room, x, y, dropped_by AS "by", dropped_at AS at FROM items
+     WHERE owner_id IS NULL AND room IS NOT NULL`,
+  );

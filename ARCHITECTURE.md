@@ -169,16 +169,18 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 - Coins: `wallet`, `buy`, `bag`; for `arcade`: `hold`, `pay`, `refund`, `recordMatch`. Games: `gameBoard`.
 - Trades: `offerTrade` (10 an hour; a new offer replaces your old one), `trades`, `acceptTrade`,
   `declineTrade`, `withdrawTrade`. See *Coins and the shop*.
-- Offices: `office` (your own), `setOffice` (places pieces from the bag), `setOfficeOpen`; 30 changes a
-  minute, since each one sends the office (and, opened or closed, its building) to everyone inside.
-- Drops: `drop` (30 a minute) takes one of a kind out of your bag (not a reward or a placed piece; at most
-  5 of yours on the floor at once) and asks `world.placeDrop` to put it where you are; a full room says so,
-  and the row comes straight back. On the floor a row has `owner_id` NULL, with `dropped_by` and `dropped_at`.
-  `pickUp` (from `world.take`) puts it in the taker's bag, unless it's gone home already. **The sweeper**
-  is a cron alarm (`sweep`, every 10 minutes; it outlives restarts and wakes the town): drops nobody took
-  in an hour come off the floor (`world.removeDrops`) and go back to their droppers. A closed company's
-  building and a deleted owner's office give theirs back at once (`removeCompany` and `removePlayer`
-  return the ids); a deleted account's own drops are deleted with it.
+- Offices: `setOfficeOpen` (your own; 30 a minute, since each one sends the office and its building to
+  everyone inside). What's in an office is what its owner dropped there.
+- Drops: `drop` (30 a minute) takes one of a kind out of your bag (not a reward; at most 5 of yours on the
+  floor at once, not counting your own office's) and asks `world.placeDrop` to put it where you are; a full
+  room says so, and the row comes straight back. On the floor a row has `owner_id` NULL, with `dropped_by`
+  and `dropped_at`, and `room`, `x`, `y` once `world` has put it down (`placed`). `pickUp` (from
+  `world.take`) puts it in the taker's bag, unless it's gone home already. **The sweeper** is a cron alarm
+  (`sweep`, every 10 minutes; it outlives restarts and wakes the town): drops nobody took in an hour come
+  off the floor (`world.removeDrops`) and go back to their droppers, except what's in its dropper's own
+  office: that's furniture. A closed company's building and a deleted owner's office give theirs back at
+  once (`removeCompany` and `removePlayer` return the ids); a deleted account's own drops are deleted with
+  it, office furniture and all.
 - Admin (`town/admin.ts`, for `/admin`): `adminOverview`, `adminUsers` and `adminCompanies`; rename people
   and companies; set a balance (the difference goes in the `ledger` as kind and ref `admin`); take someone
   out of their company; close a company; wipe someone's usage (their `player` drops its raw events too:
@@ -188,7 +190,8 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   refused while they have coins in an unsettled game. Their `ledger` and `match_players` rows stay, and
   `deleted_users` keeps new ids above theirs, so nobody inherits them.
 - Every change a player could see is pushed to `world` (`town/sync.ts`); `world` asks `town` only to put a
-  taken drop in the bag (`pickUp`), and for everyone (`seed`) when it starts from nothing.
+  taken drop in the bag (`pickUp`), and for every floor and office lock (`seed`) when it starts, and for
+  everyone too when it starts from nothing.
 
 **`world["main"]`**: everything live, in actor state, with chat in SQLite (last 200 lines per room).
 - A 10 Hz tick sends each room its `moves`, and head counts (`occupancy`) and who's inside each house
@@ -200,9 +203,11 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   an office floor, only its owner).
 - Events: `snapshot` (on joining or changing room), `moves`, `info`, `companies`, `occupancy`, `houses`, `notice`,
   `chat`, `mention`, `drop`, `pickup`.
-- **Drops** (`drops` in state, by items row id; at most 30 a room): a parcel on the dropper's tile or the
-  nearest free one, furniture as itself in the room's map (`mapOf`), so a dropped sofa seats. `take` lifts
-  it off the floor first, then asks `town.pickUp`; if that call fails, it goes back down.
+- **Drops** (`DROPS`, in memory only: `town` has every floor, and a starting world lays them again from
+  `seed`; at most 30 a room, 40 an office): a parcel on the dropper's tile or the nearest free one,
+  furniture on the tile they face or the nearest free one to it, as itself in the room's map (`mapOf`), so
+  a dropped sofa seats. An office's map is the template and its drops. `take` lifts it off the floor first,
+  then asks `town.pickUp`; if that call fails, it goes back down.
 - **Resting.** Closing the last tab sends you to your bed; offline with agents active in the last 10 minutes, to
   your desk. Company members rest in their house, others at the Inn. Your spot is remembered: the next `join` puts
   you back there, unless it's a house you've left or someone's office that closed (`back` after a game too).
@@ -235,21 +240,23 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   Pets follow their owner in the client.
 - **The bag** (`items`, the 🎒 panel): one row per copy, so you can hold two Ducks; you can wear a kind if you
   hold one. Buying adds a row and adds the price to `purchases` (spend only, one row per kind); buying a
-  kind you hold already is fine. `bag()` counts each kind and how many of it are in your office.
+  kind you hold already is fine. `bag()` counts each kind. What's on a floor isn't in anyone's bag.
 - Three items are earned, not bought: a top hat, server-rack armour and a Singularity orb, at levels 10, 20
   and 30. `report` hands them out as rows the first time a sync reaches the level (`grantRewards`, once each,
-  recorded in `rewards`), with the office's desk and chair at level 10. Rewards are `tradeable: false`.
+  recorded in `rewards`), with the office's desk and chair at level 10, dropped on its floor
+  (`starterDrops`). Rewards are `tradeable: false`.
 - **Trades** (from a player card): up to 🪙 500 and 4 items each way, for 7 days; not rewards, and not
-  furniture that's in your office. Accepting re-checks both sides under `serial` and moves everything in one
+  furniture on a floor (pick it up first). Accepting re-checks both sides under `serial` and moves everything in one
   transaction (`settleTrade`): coins through the `ledger` (kind `trade`), items by moving one row of each kind
   to the receiver. Spend stays in `purchases`, so balances don't change. A kind you no longer hold comes off
   your look.
 - **Offices.** From level 10, every company member has one behind a door with their name on it in the
   company building (`office:<userId>`, one map template plus their furniture). The doors are in hallways of
   10 above the building's floor (negative `y`, `hqMap`), which `world` rebuilds when a door comes or goes.
-  Furniture is the map legend's own pieces, bought into the bag; placing one sets its row's `placed`, removing
-  it puts it back in the bag, and none of it costs. Only the owner edits an office, so placed furniture can't
-  be traded away. Anyone in the building walks into an open office; from outside, from the owner's card.
+  Furniture is the map legend's own pieces, bought into the bag and furnished by dropping: in your own
+  office a drop stays (no hour, no five), at most 40, and only you take anything off its floor, a
+  visitor's gift too. The Menu opens or closes it while you're in it. Anyone in the building walks into an
+  open office; from outside, from the owner's card.
 
 ## Games
 

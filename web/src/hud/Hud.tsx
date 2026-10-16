@@ -3,6 +3,7 @@ import { compact, levelTitle } from "@tokenmaxxing/core/format.ts";
 import { levelItems } from "@tokenmaxxing/core/shop.ts";
 import { useEffect, useRef, useState } from "react";
 import { roomName, world } from "../game/world.ts";
+import { town } from "../net.ts";
 import { chatBeside, hud, useHud } from "../store.ts";
 import { AppSignIn } from "./AppSignIn.tsx";
 import { AppUpdate, tauri } from "./AppUpdate.tsx";
@@ -16,11 +17,10 @@ import { LookPicker } from "./LookPicker.tsx";
 import { MatchPanel } from "./Match.tsx";
 import { MiniBoard } from "./MiniBoard.tsx";
 import { Minimap } from "./Minimap.tsx";
-import { OfficePanel } from "./OfficePanel.tsx";
 import { BotCard, PlayerCard } from "./PlayerCard.tsx";
 import { Shop } from "./Shop.tsx";
 import { TradePanel, TradesPanel } from "./Trades.tsx";
-import { Modal } from "./ui.tsx";
+import { Modal, useRun } from "./ui.tsx";
 
 export function Hud() {
   const status = useHud((s) => s.status);
@@ -206,17 +206,11 @@ function Panel() {
       return <TradePanel userId={panel.userId} />;
     case "trades":
       return <TradesPanel />;
-    case "office":
-      return <OfficePanel />;
     case "menu":
       return (
         <Modal title="Menu">
           <nav className="menu">
-            {inMyOffice && (
-              <button type="button" onClick={() => hud.set({ panel: { kind: "office" } })}>
-                🛋 Furnish your office
-              </button>
-            )}
+            {inMyOffice && <OfficeLock />}
             <button type="button" onClick={() => hud.set({ panel: { kind: "look" } })}>
               🎨 Your character
             </button>
@@ -245,6 +239,26 @@ function Panel() {
         </Modal>
       );
   }
+}
+
+/** In my own office: open to visitors from my card, or only me, through the door. */
+function OfficeLock() {
+  const [open, setOpen] = useState(world.owner?.open ?? true);
+  const { error, run } = useRun();
+  return (
+    <>
+      <button
+        type="button"
+        onClick={run(async () => {
+          await town.setOfficeOpen(!open);
+          setOpen(!open);
+        })}
+      >
+        {open ? "🔓 Open to visitors" : "🔒 Closed"}
+      </button>
+      {error && <p className="error">{error}</p>}
+    </>
+  );
 }
 
 function SignedOut({ expired }: { expired: boolean }) {

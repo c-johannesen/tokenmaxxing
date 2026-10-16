@@ -325,7 +325,7 @@ export const MAPS: Record<MapId, GameMap> = {
     "Wp____________pW",
     "WWWWWWWxWWWWWWWW",
   ]),
-  // Everyone's office, before their furniture goes in (officeMap). ponytail: one template; bigger
+  // Everyone's office, before what they dropped in it (`mapOf`). ponytail: one template; bigger
   // offices per house tier would be an `OFFICE_SIZES` table.
   office: new GameMap("office", "Office", [
     "WWWWWWWWWWWW",

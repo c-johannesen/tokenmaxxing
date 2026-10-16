@@ -29,10 +29,9 @@ export async function push(sql: Sql, client: Client<typeof registry>, changed: C
   await pushPlayers(sql, client, [...new Set(changed.users)]);
 }
 
-/** Someone's office, as saved: whoever is inside sees it change. */
+/** Someone's office opened or closed: the 🔒 on its door. */
 export async function pushOffice(sql: Sql, client: Client<typeof registry>, userId: number): Promise<void> {
-  const o = await officeOf(sql, userId);
-  await main(client).world.setOffice(userId, o.furniture, o.open);
+  await main(client).world.setOfficeOpen(userId, (await officeOf(sql, userId)).open);
 }
 
 /** Reads the website and stores the house's colours and logo, unless the website changed meanwhile. */

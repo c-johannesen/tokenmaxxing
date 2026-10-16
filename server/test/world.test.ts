@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { BOTS } from "@tokenmaxxing/core/bots.ts";
 import { MAPS } from "@tokenmaxxing/core/maps.ts";
-import { hqMap, STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
+import { hqMap } from "@tokenmaxxing/core/office.ts";
 import {
   type ChatLine,
   cupsLeft,
@@ -16,6 +16,11 @@ import {
   type Snapshot,
   setDrops,
 } from "@tokenmaxxing/core/world.ts";
+import { town } from "../src/actors/town.ts";
+import { world } from "../src/actors/world.ts";
+import { grantRewards, placed, takeOut } from "../src/town/coins.ts";
+import { migrate } from "../src/town/schema.ts";
+import { memorySql } from "./memory-sql.ts";
 import { admin, admit, as, event, eventually, rich, signUp, veteran } from "./rivet.ts";
 
 async function connect(token: string) {
@@ -265,8 +270,16 @@ describe("world", () => {
       expect(snap.room).toBe(room);
       return snap;
     });
-    expect(inside.furniture).toEqual([...STARTER_OFFICE]);
-    expect(inside.owner).toEqual({ id: owner.userId, name: owner.name });
+    // Level 10 put a desk and a chair on its floor.
+    expect(inside.drops).toMatchObject([
+      { item: "furn.d", x: 5, y: 3, by: owner.userId },
+      { item: "furn.c", x: 5, y: 4, by: owner.userId },
+    ]);
+    expect(inside.owner).toEqual({ id: owner.userId, name: owner.name, open: true });
+    // Only its owner opens or closes it: anyone else's call is about their own.
+    await guest.town.setOfficeOpen(false);
+    expect((await guest.town.profile(owner.userId, "7d")).office).toBe("open");
+    expect(await g.conn.visit(owner.userId)).toMatchObject({ room });
 
     await owner.town.setOfficeOpen(false);
     expect(await g.conn.visit(owner.userId)).toEqual({ notice: `🔒 ${owner.name}'s office is closed.` });
@@ -275,13 +288,10 @@ describe("world", () => {
     expect(await o.conn.visit(owner.userId)).toMatchObject({ room });
     await o.conn.dispose();
 
-    // Deleted, their office goes from the world too; the guest still inside sees a new one.
-    await admin().adminSetCoins(owner.userId, 100);
-    await owner.town.buy("furn.s");
-    await owner.town.setOffice([...STARTER_OFFICE, { ch: "s", x: 1, y: 1 }]);
+    // Deleted, their office goes from the world too, furniture and all; the guest still inside sees a bare one.
     await admin().adminDeleteUser(owner.userId);
     const again = await connect(guest.token);
-    expect(again.snap).toMatchObject({ room, furniture: [...STARTER_OFFICE] });
+    expect(again.snap).toMatchObject({ room, drops: [] });
     for (const c of [g, again]) await c.conn.dispose();
   });
 
@@ -347,7 +357,7 @@ describe("drops", () => {
     await walk(m.conn, path.slice(-1));
     expect(await m.conn.take()).toEqual({ notice: "🎒 Took the Duck.", drop: duck });
     expect(await owner.town.bag()).toEqual([]);
-    expect(await mate.town.bag()).toEqual([{ item: "pet.1", count: 1, placed: 0 }]);
+    expect(await mate.town.bag()).toEqual([{ item: "pet.1", count: 1 }]);
     for (const c of [o, m]) await eventually(() => expect(c.events.pickups).toEqual([{ id: duck.id }]));
     expect(await m.conn.take()).toBeNull(); // already gone
     for (const c of [o, m]) await c.conn.dispose();
@@ -367,10 +377,10 @@ describe("drops", () => {
     for (const u of people.slice(0, 6)) for (let i = 0; i < 5; i++) await drop(u, "furn.=");
     const last = people[6]!;
     expect(await last.town.drop("furn.=")).toEqual({ notice: "There's no room on the floor here." });
-    expect(await last.town.bag()).toEqual([{ item: "furn.=", count: 5, placed: 0 }]);
+    expect(await last.town.bag()).toEqual([{ item: "furn.=", count: 5 }]);
     // Closed, its floor goes back to whoever dropped it.
     await admin().adminCloseCompany(co.id);
-    expect(await owner.town.bag()).toEqual([{ item: "furn.=", count: 5, placed: 0 }]);
+    expect(await owner.town.bag()).toEqual([{ item: "furn.=", count: 5 }]);
   });
 
   test("a dropped sofa is a sofa: sat on, taken while seated, and the sitter is up after", async () => {
@@ -386,15 +396,19 @@ describe("drops", () => {
       const [, x, y, , state] = o.events.moves.flatMap((mv) => mv.m).findLast(([id]) => id === mate.userId)!;
       expect([x, y, state]).toEqual([sofa.x, sofa.y, "idle"]);
     });
-    expect(await mate.town.bag()).toEqual([{ item: "furn.s", count: 1, placed: 0 }]);
+    expect(await mate.town.bag()).toEqual([{ item: "furn.s", count: 1 }]);
     for (const c of [o, m]) await c.conn.dispose();
   });
 
   test("a dropped desk blocks; it's taken from the next tile, facing it, not from further or off a parcel", async () => {
     const { owner, room, o, m, ownerAt, mateAt } = await house("furn.d", "hat.1");
+    // Furniture goes on the free tile you face: here, below (5, 4).
+    await walk(o.conn, [...route(mapOf(room), [ownerAt.x, ownerAt.y], [5, 3])!, "down"]);
     const desk = await drop(owner, "furn.d");
+    expect(desk).toMatchObject({ x: 5, y: 5 });
     // A hat on the tile below the desk: the owner stands there to drop it.
-    await walk(o.conn, route(mapOf(room), [ownerAt.x, ownerAt.y], [desk.x, desk.y + 1])!);
+    const at = { x: 5, y: 4 };
+    await walk(o.conn, route(mapOf(room), [at.x, at.y], [desk.x, desk.y + 1])!);
     expect(await drop(owner, "hat.1")).toMatchObject({ x: desk.x, y: desk.y + 1 });
     // Two tiles below it, facing it: too far.
     await walk(m.conn, [...route(mapOf(room), [mateAt.x, mateAt.y], [desk.x, desk.y + 3])!, "up"]);
@@ -408,7 +422,7 @@ describe("drops", () => {
     for (const c of [o, m]) await c.conn.dispose();
   });
 
-  test("an office floor is its owner's: a visitor's gift is theirs to take", async () => {
+  test("an office floor is its owner's: its furniture, and a visitor's gift, are theirs to take", async () => {
     const owner = await signUp("gift");
     await owner.town.createCompany("Gifts");
     await veteran(owner);
@@ -419,11 +433,64 @@ describe("drops", () => {
     // Both land on the office's entry tile, where the cat is.
     const cat = await drop(guest, "pet.2");
     expect(await g.conn.take()).toEqual({ notice: `That's ${owner.name}'s floor.` });
+    // Nor the chair that came at level 10, sitting on it.
+    await walk(g.conn, ["up", "up", "up"]);
+    expect(await g.conn.sit("up")).toMatchObject({ x: 5, y: 4, state: "sit" });
+    expect(await g.conn.take()).toEqual({ notice: `That's ${owner.name}'s floor.` });
     const o = await connect(owner.token);
     await o.conn.visit(owner.userId);
     expect(await o.conn.take()).toMatchObject({ drop: cat });
-    expect(await owner.town.bag()).toContainEqual({ item: "pet.2", count: 1, placed: 0 });
+    expect(await owner.town.bag()).toContainEqual({ item: "pet.2", count: 1 });
     expect(await guest.town.bag()).toEqual([]);
     for (const c of [g, o]) await c.conn.dispose();
+  });
+
+  test("an office is furnished by dropping: a desk lands on the tile you face; 40 pieces at most", async () => {
+    const owner = await rich("furnish", 400);
+    await owner.town.createCompany("Furnished");
+    await veteran(owner); // the desk and chair: 2
+    await owner.town.buy("furn.d");
+    for (let i = 0; i < 28; i++) await owner.town.buy("furn.=");
+    const o = await connect(owner.token);
+    const room = `office:${owner.userId}` as const;
+    expect(await o.conn.visit(owner.userId)).toMatchObject({ room, x: 5, y: 7, facing: "up" });
+    expect(await drop(owner, "furn.d")).toMatchObject({ room, x: 5, y: 6 });
+    // Your own office's floor isn't loot: no five at a time.
+    for (let i = 0; i < 27; i++) await drop(owner, "furn.="); // 30
+    for (let n = 0; n < 2; n++) {
+      const guest = await rich("furnish", 50);
+      for (let i = 0; i < 5; i++) await guest.town.buy("furn.=");
+      const g = await connect(guest.token);
+      await g.conn.visit(owner.userId);
+      for (let i = 0; i < 5; i++) await drop(guest, "furn.="); // 40
+      await g.conn.dispose();
+    }
+    expect(await owner.town.drop("furn.=")).toEqual({ notice: "There's no room on the floor here." });
+    expect(await owner.town.bag()).toContainEqual({ item: "furn.=", count: 1 });
+    await o.conn.dispose();
+  });
+
+  test("a world starting up lays every floor again from `town`: an office's furniture, a drop in the Inn", async () => {
+    // `town` and `world` in this process, on an in-memory database: the world's restart can't be driven
+    // on the server.
+    const { sql } = memorySql();
+    await migrate(sql);
+    await sql.execute("INSERT INTO users (id, name, look, created_at) VALUES (7, 'ada', '{}', 0)");
+    await sql.execute("INSERT INTO items (owner_id, item, at) VALUES (7, 'pet.1', 0)");
+    await grantRewards(sql, 7, 10, 0);
+    const id = await takeOut(sql, 7, "pet.1", 0);
+    await placed(sql, { id, item: "pet.1", room: "inn", x: 3, y: 3, by: 7, at: 0 });
+    const seed = await town.config.actions!.seed({ conn: { state: { kind: "internal" } }, db: sql } as never);
+    await world.config.onWake!({
+      state: { seeded: true, players: {}, companies: {} },
+      conns: new Map(),
+      client: () => {
+        const actor = { getOrCreate: () => ({ seed: async () => seed }) };
+        return { town: actor, world: actor, arcade: actor };
+      },
+    } as never);
+    expect([mapOf("office:7").at(5, 3), mapOf("office:7").at(5, 4)]).toEqual(["d", "c"]);
+    expect(DROPS.get("inn")).toEqual([{ id, item: "pet.1", room: "inn", x: 3, y: 3, by: 7, at: 0 }]);
+    for (const room of ["inn", "office:7"] as const) setDrops(room, []);
   });
 });

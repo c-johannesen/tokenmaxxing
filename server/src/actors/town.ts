@@ -1,5 +1,4 @@
 import { frontier } from "@tokenmaxxing/core/maps.ts";
-import { OFFICE_LEVEL, parseOffice } from "@tokenmaxxing/core/office.ts";
 import { isRangeKey } from "@tokenmaxxing/core/range.ts";
 import {
   emptySide,
@@ -53,23 +52,22 @@ import {
   buy,
   checkTrade,
   type Entry,
-  furnish,
+  floors,
   giveBack,
   grantRewards,
   type HoldKind,
   heldIn,
   hold,
   type Office,
-  officeOf,
   offices,
   ownedItems,
   type PayKind,
   pay,
   pickUp,
+  placed,
   refund,
   setBalance,
   settleTrade,
-  starterOffice,
   type Trade,
   takeOut,
   tradesWhere,
@@ -484,6 +482,7 @@ export const town = actor({
           await giveBack(c.db, [id]);
           return put;
         }
+        await placed(c.db, put);
         await unwear(c.db, userId, [put.item]);
         return { notice: `Dropped the ${dropName(put)}.`, drop: put };
       });
@@ -597,33 +596,12 @@ export const town = actor({
       return { name: u.name, owned: (await ownedItems(c.db, u.id)).filter(isTradeable) };
     },
 
-    /** My office: what's in it, and whether it's open. */
-    office: (c): Promise<Office> => officeOf(c.db, requireUser(c.conn.state)),
-
-    /** Saves my office's furniture, from my bag. */
-    setOffice: async (c, raw: unknown): Promise<void> => {
-      const userId = requireUser(c.conn.state);
-      if (!c.vars.offices.take(String(userId), Date.now()))
-        throw new UserError("That's a lot of changes. Try again in a minute.", { code: "rate_limited" });
-      if ((await levelOf(c.db, userId)) < OFFICE_LEVEL)
-        throw new UserError(`Your own office opens at level ${OFFICE_LEVEL}.`, { code: "too_low" });
-      if ((await userById(c.db, userId)).companyId === null)
-        throw new UserError("Offices are in company buildings. Join a company first.", {
-          code: "no_company",
-        });
-      const furniture = parseOffice(raw);
-      if (!furniture) throw new UserError("That doesn't fit in the office.", { code: "invalid_office" });
-      await c.vars.serial(() => furnish(c.db, userId, furniture, Date.now()));
-      await pushOffice(c.db, c.client<typeof registry>(), userId);
-    },
-
     /** Open: anyone can visit from my player card. Closed: only I get in, through the door. */
     setOfficeOpen: async (c, open: unknown): Promise<void> => {
       const userId = requireUser(c.conn.state);
       if (!c.vars.offices.take(String(userId), Date.now()))
         throw new UserError("That's a lot of changes. Try again in a minute.", { code: "rate_limited" });
       if (typeof open !== "boolean") throw new UserError("Open or closed?", { code: "invalid_office" });
-      await starterOffice(c.db, userId, Date.now());
       await c.db.execute("UPDATE offices SET open = ? WHERE user_id = ?", open ? 1 : 0, userId);
       await pushOffice(c.db, c.client<typeof registry>(), userId);
     },
@@ -637,7 +615,7 @@ export const town = actor({
       activity: ActivityDay[],
     ): Promise<void> => {
       requireInternal(c.conn.state);
-      await c.vars.serial(() =>
+      const drops = await c.vars.serial(() =>
         c.db.transaction(
           async (tx) => {
             const inDays = `day IN (${days.map(() => "?").join(",")})`;
@@ -676,11 +654,13 @@ export const town = actor({
               "INSERT INTO capped_daily VALUES",
               activity.filter((a) => a.capped > 0).map((a) => [userId, a.day, a.capped]),
             );
-            await grantRewards(tx, userId, await levelOf(tx, userId), Date.now());
+            return grantRewards(tx, userId, await levelOf(tx, userId), Date.now());
           },
           { name: "report-usage" },
         ),
       );
+      // Level 10: the office's desk and chair, on its floor.
+      if (drops.length > 0) await main(c.client<typeof registry>()).world.placeDrops(drops);
       const u = await userById(c.db, userId);
       await push(c.db, c.client<typeof registry>(), {
         users: [userId],
@@ -900,10 +880,15 @@ export const town = actor({
         await notify(client, id, { text: "Your company was closed by the town admin.", open: "company" });
     },
 
-    /** For `world` starting from nothing: everyone, every company and every saved office. */
+    /** For `world` starting up: everyone, every company, every office and everything on a floor. */
     seed: async (
       c,
-    ): Promise<{ players: PlayerCore[]; companies: CompanyInfo[]; offices: Record<number, Office> }> => {
+    ): Promise<{
+      players: PlayerCore[];
+      companies: CompanyInfo[];
+      offices: Record<number, Office>;
+      drops: Drop[];
+    }> => {
       requireInternal(c.conn.state);
       const users = await all<UserRow>(c.db, `SELECT ${USER_COLS} FROM users`);
       const companies = await all<{ id: number }>(c.db, "SELECT id FROM companies");
@@ -917,6 +902,7 @@ export const town = actor({
           companies.map((r) => r.id),
         ),
         offices: await offices(c.db),
+        drops: await floors(c.db),
       };
     },
   },

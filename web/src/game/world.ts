@@ -1,5 +1,5 @@
 import { type GameMap, setTown } from "@tokenmaxxing/core/maps.ts";
-import { type Door, setHq, setOffice } from "@tokenmaxxing/core/office.ts";
+import { type Door, setHq } from "@tokenmaxxing/core/office.ts";
 import {
   type ChatLine,
   type CompanyInfo,
@@ -65,7 +65,7 @@ export const world = {
   games: new Map<number, WorldGame>(),
   /** A line said at a game's table itself ("🤝 Draw"), shown over the table briefly. */
   tableBubbles: new Map<number, { text: string; until: number }>(),
-  /** In an office: whose it is. */
+  /** In an office: whose it is, and whether it's open. */
   owner: null as Snapshot["owner"],
   /** In a building: its office doors, with the names drawn over them. */
   doors: [] as Door[],
@@ -111,8 +111,6 @@ export function loadSnapshot(s: Snapshot): void {
   world.selfId = s.selfId;
   world.owner = s.owner;
   setCompanies(s.companies);
-  const owner = ownerOfOffice(s.room);
-  if (owner !== null && s.furniture) setOffice(owner, s.furniture);
   const company = companyOfRoom(s.room);
   if (company !== null) setHq(company, s.doors);
   world.doors = s.doors;
@@ -141,7 +139,7 @@ export function loadSnapshot(s: Snapshot): void {
     ...(changedRoom
       ? {
           banner: { text: roomName(s.room), at: Date.now() },
-          dialog: hint ? "Press E on a wall to furnish your office." : null,
+          dialog: hint ? "Drop furniture from your Bag to furnish your office." : null,
         }
       : {}),
   });

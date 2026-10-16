@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { doorOf, MAPS, plotId, townMap } from "../src/maps.ts";
-import { doorsFor, setOffice } from "../src/office.ts";
+import { doorsFor, setHq } from "../src/office.ts";
 import { addDays, dayKey, rangeDays } from "../src/range.ts";
 import {
   CUP_MS,
@@ -127,11 +127,11 @@ describe("drops", () => {
   });
 
   test("a room's own map changing shows through, drops and all", () => {
-    setDrops("office:77", [drop(1, "furn.d", 2, 2, "office:77")]);
-    expect(mapOf("office:77").at(2, 2)).toBe("d");
-    setOffice(77, [{ ch: "p", x: 1, y: 1 }]);
-    expect([mapOf("office:77").at(1, 1), mapOf("office:77").at(2, 2)]).toEqual(["p", "d"]);
-    setDrops("office:77", []);
+    setDrops("hq:77", [drop(1, "furn.d", 2, 4, "hq:77")]);
+    expect(mapOf("hq:77").at(2, 4)).toBe("d");
+    setHq(77, doorsFor([{ userId: 1, name: "ada", open: true }]));
+    expect([mapOf("hq:77").at(1, -2), mapOf("hq:77").at(2, 4)]).toEqual(["R", "d"]);
+    setDrops("hq:77", []);
   });
 });
 

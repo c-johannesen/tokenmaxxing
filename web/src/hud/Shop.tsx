@@ -1,4 +1,5 @@
-import { FURNITURE, officeMap } from "@tokenmaxxing/core/office.ts";
+import { MAPS } from "@tokenmaxxing/core/maps.ts";
+import { FURNITURE, withPieces } from "@tokenmaxxing/core/office.ts";
 import { ITEMS, type Item, PODIUM_COINS } from "@tokenmaxxing/core/shop.ts";
 import type { Look } from "@tokenmaxxing/core/world.ts";
 import type { BagRow } from "@tokenmaxxing/server/registry";
@@ -145,7 +146,7 @@ function PieceImage({ ch, scale = 2 }: { ch: string; scale?: number }) {
     const g = ref.current?.getContext("2d");
     if (!g) return;
     g.imageSmoothingEnabled = false;
-    const sprite = objectAt(officeMap([{ ch, x: 1, y: 1 }]), 1, 1)?.canvas;
+    const sprite = objectAt(withPieces([{ ch, x: 1, y: 1 }], MAPS.office), 1, 1)?.canvas;
     if (!sprite) {
       g.fillStyle = C.rug;
       g.fillRect(8 * scale, 16 * scale, 16 * scale, 14 * scale);
