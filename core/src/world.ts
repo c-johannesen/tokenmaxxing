@@ -5,7 +5,19 @@
 import type { Seat, Spot } from "./games/gather.ts";
 import type { BoardRow, GameId } from "./games/types.ts";
 import { blockOf, doorOf, type GameMap, MAPS, type MapId, plotId, TOWN_SPAWN } from "./maps.ts";
-import { type Door, doorAt, HQS, OFFICES, type Placed, STARTER_OFFICE, setOffice } from "./office.ts";
+import {
+  type Door,
+  doorAt,
+  HQS,
+  OFFICES,
+  officeMap,
+  type Piece,
+  type Placed,
+  pieceOf,
+  STARTER_OFFICE,
+  setOffice,
+} from "./office.ts";
+import { itemById } from "./shop.ts";
 
 export const TILE = 16;
 /** Client animation time per step; the server only enforces the running pace. */
@@ -42,12 +54,64 @@ export const ownerOfOffice = (room: RoomId): number | null =>
   room.startsWith("office:") ? Number(room.slice(7)) : null;
 
 /** An office nobody has furnished yet holds `STARTER_OFFICE`; a building nobody has built is the bare floor. */
-export function mapOf(room: RoomId): GameMap {
+function baseMap(room: RoomId): GameMap {
   const owner = ownerOfOffice(room);
   if (owner !== null) return OFFICES.get(owner) ?? setOffice(owner, STARTER_OFFICE);
   const company = companyOfRoom(room);
   return company !== null ? (HQS.get(company) ?? MAPS.hq) : MAPS[room as MapId];
 }
+
+/**
+ * A room's map, with the furniture dropped in it written over the floor (parcels aren't in it). Kept
+ * until its drops or its own map change. ponytail: a parcel rebuilds it too (and the client bakes the
+ * ground again); leave parcels out of the key if they ever churn.
+ */
+export function mapOf(room: RoomId): GameMap {
+  const base = baseMap(room);
+  const hit = dropped.get(room);
+  if (hit?.base === base) return hit.map;
+  const pieces = (DROPS.get(room) ?? []).flatMap((d) => {
+    const piece = pieceOfDrop(d);
+    return piece ? [{ ch: piece.ch, x: d.x, y: d.y }] : [];
+  });
+  const map = pieces.length ? officeMap(pieces, base) : base;
+  dropped.set(room, { base, map });
+  return map;
+}
+
+// MARK: Drops
+
+/** An item on a room's floor: `id` is its `items` row, `by` who dropped it. */
+export interface Drop {
+  id: number;
+  item: string;
+  room: RoomId;
+  x: number;
+  y: number;
+  by: number;
+  at: number;
+}
+
+/** What's on each room's floor. ponytail: one process holds every room's, like the offices. */
+export const DROPS = new Map<RoomId, readonly Drop[]>();
+const dropped = new Map<RoomId, { base: GameMap; map: GameMap }>();
+
+export function setDrops(room: RoomId, drops: readonly Drop[]): void {
+  DROPS.set(room, drops);
+  dropped.delete(room);
+}
+
+/** A dropped piece of furniture (`furn.<ch>`); wearables and pets lie in a parcel instead. */
+export const pieceOfDrop = (d: Pick<Drop, "item">): Piece | undefined =>
+  d.item.startsWith("furn.") ? pieceOf(d.item.slice(5)) : undefined;
+
+/** What it is: "Sofa", "Duck". */
+export const dropName = (d: Pick<Drop, "item">): string =>
+  pieceOfDrop(d)?.name ?? itemById(d.item)?.name ?? "Something";
+
+/** Whether a drop lies on (x, y): a TV is two tiles. */
+export const dropCovers = (d: Drop, x: number, y: number): boolean =>
+  d.y === y && x >= d.x && x < d.x + (pieceOfDrop(d)?.w ?? 1);
 
 // MARK: Looks
 
@@ -214,6 +278,8 @@ export interface Snapshot {
   owner: { id: number; name: string } | null;
   /** Only in a building: its office doors, to build the map and draw the names. */
   doors: Door[];
+  /** What's on the floor: furniture (in the map too) and parcels. */
+  drops: Drop[];
 }
 
 /** A game on show in town: where its table (or arena) is, who's at it, and how it's going. */

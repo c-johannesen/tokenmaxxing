@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { doorOf, MAPS, plotId, townMap } from "../src/maps.ts";
-import { doorsFor } from "../src/office.ts";
+import { doorsFor, setOffice } from "../src/office.ts";
 import { addDays, dayKey, rangeDays } from "../src/range.ts";
 import {
   CUP_MS,
   cupsLeft,
+  type Drop,
   defaultLook,
   drinkCoffee,
   houseTier,
   MAX_CUPS,
+  mapOf,
   mentionsIn,
   namesIn,
   outsideDoor,
@@ -17,6 +19,7 @@ import {
   RUN_STEP_MS,
   restSpot,
   roomEntry,
+  setDrops,
   stepTarget,
   takeStep,
 } from "../src/world.ts";
@@ -94,6 +97,38 @@ describe("portals", () => {
     });
     expect(portal("office:9", exit, 3, plots, [])).toEqual(roomEntry("hq:3")); // no door: the entry
     expect(portal("office:9", exit, null, plots, [])).toEqual(roomEntry("inn"));
+  });
+});
+
+describe("drops", () => {
+  const drop = (id: number, item: string, x: number, y: number, room: Drop["room"] = "inn"): Drop => ({
+    id,
+    item,
+    room,
+    x,
+    y,
+    by: 1,
+    at: 0,
+  });
+
+  test("dropped furniture is in the room's map, kept until the drops change; parcels aren't", () => {
+    setDrops("inn", [drop(1, "furn.s", 3, 3), drop(2, "furn.t", 5, 3), drop(3, "pet.1", 8, 3)]);
+    const map = mapOf("inn");
+    expect([3, 5, 6, 8].map((x) => map.at(x, 3))).toEqual(["s", "t", "t", "_"]);
+    expect(stepTarget(map, 3, 4, "up").kind).toBe("blocked");
+    expect(MAPS.inn.at(3, 3)).toBe("_");
+    expect(mapOf("inn")).toBe(map);
+    setDrops("inn", [drop(3, "pet.1", 8, 3)]);
+    expect(mapOf("inn")).toBe(MAPS.inn);
+    setDrops("inn", []);
+  });
+
+  test("a room's own map changing shows through, drops and all", () => {
+    setDrops("office:77", [drop(1, "furn.d", 2, 2, "office:77")]);
+    expect(mapOf("office:77").at(2, 2)).toBe("d");
+    setOffice(77, [{ ch: "p", x: 1, y: 1 }]);
+    expect([mapOf("office:77").at(1, 1), mapOf("office:77").at(2, 2)]).toEqual(["p", "d"]);
+    setDrops("office:77", []);
   });
 });
 
