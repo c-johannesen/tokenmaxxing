@@ -16,6 +16,7 @@ const GROUND: Record<string, Ground> = {
   "=": "rug",
   W: "wall",
   x: "exit",
+  R: "exit",
 };
 
 function groundAt(map: GameMap, x: number, y: number): Ground {
@@ -136,7 +137,8 @@ function rug(p: Pen, map: GameMap, ox: number, oy: number, x: number, y: number)
 }
 
 function wall(p: Pen, map: GameMap, ox: number, oy: number, x: number, y: number): void {
-  const face = map.at(x, y + 1) !== "W" && map.contains(x, y + 1);
+  // The office door is in the wall's face, so the wall above it stays a wall top.
+  const face = !"WR".includes(map.at(x, y + 1)) && map.contains(x, y + 1);
   if (!face) {
     p.rect(ox, oy, TILE, TILE, C.wallTop);
     if (hash(x, y, 5) < 0.3) p.rect(ox + 3, oy + 6, 6, 1, C.wallTopLight);

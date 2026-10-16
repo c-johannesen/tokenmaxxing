@@ -52,6 +52,9 @@ export async function tokensIn(
   return new Map(rows.map((r) => [r.userId, r.tokens]));
 }
 
+export const levelOf = async (sql: Sql, userId: number): Promise<number> =>
+  levelFor((await tokensIn(sql, [userId])).get(userId) ?? 0);
+
 export async function playerCores(sql: Sql, userIds: number[]): Promise<PlayerCore[]> {
   const users = await all<UserRow>(
     sql,

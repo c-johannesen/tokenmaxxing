@@ -154,6 +154,8 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 - Tables: `users`, `companies` (ids never reused), `usage_daily`, `activity_daily`, `capped_daily`,
   `purchases`, `ledger` (coins held and paid by games, and traded), `trades` (one open offer per sender),
   `match_players` (one row per player per finished game), `deleted_users`, `admin_log`.
+  `purchases`, `ledger` (coins held and paid by games, and paid for furniture), `offices`, `match_players`
+  (one row per player per finished game), `deleted_users`, `admin_log`.
 - Accounts: `signUp` (20 an hour per IP, 1,000 an hour in all), `rename`, `setLook` (refuses shop items you don't own), `me`.
 - Companies: create (on a plot the owner picks: any empty block next to the town, see `frontier` in
   `core/src/maps.ts`), leave, kick, rename, `setWebsite`. One company per person, at most 50 members. The
@@ -168,6 +170,7 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 - Coins: `wallet`, `buy`; for `arcade`: `hold`, `pay`, `refund`, `recordMatch`. Games: `gameBoard`.
 - Trades: `offerTrade` (10 an hour; a new offer replaces your old one), `trades`, `acceptTrade`,
   `declineTrade`, `withdrawTrade`. See *Coins and the shop*.
+- Offices: `office`, `setOffice` (pays for every piece there's more of), `setOfficeOpen`.
 - Admin (`town/admin.ts`, for `/admin`): `adminOverview`, `adminUsers` and `adminCompanies`; rename people
   and companies; set a balance (the difference goes in the `ledger` as kind and ref `admin`); take someone
   out of their company; close a company; wipe someone's usage (their `player` drops its raw events too:
@@ -183,7 +186,8 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   (`houses`, for town) when they change.
 - Actions: `join`, `step` (one adjacent walkable tile, no faster than running; doors change room), `sit`,
   `drink` (a coffee machine: each cup adds 90 s of shaking, up to 6 stacked, sent as `coffeeUntil` in `info`),
-  `say` (20 a minute; `@name` sends `mention` to someone in another room), `back` (after a game).
+  `say` (20 a minute; `@name` sends `mention` to someone in another room), `back` (after a game), `visit`
+  (someone's open office, from their card).
 - Events: `snapshot` (on joining or changing room), `moves`, `info`, `companies`, `occupancy`, `houses`, `notice`,
   `chat`, `mention`.
 - **Resting.** Closing the last tab sends you to your bed; offline with agents active in the last 10 minutes, to
@@ -220,6 +224,10 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   both sides under `serial` and moves everything in one transaction (`settleTrade`): coins through the
   `ledger` (kind `trade`), items by moving the `purchases` row to the receiver at price 0, with a ledger row
   of minus the price for the giver so their balance stays put. An item that leaves you comes off your look.
+- **Offices.** From level 10, every company member has one behind the `R` door in the company building
+  (`office:<userId>`, one map template plus their furniture). Furniture is the map legend's own pieces,
+  10 to 120 coins; placing costs, moving is free, removing refunds nothing. Open offices can be visited
+  from the owner's card.
 
 ## Games
 

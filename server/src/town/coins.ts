@@ -7,8 +7,11 @@ import {
   itemById,
   itemsIn,
   levelItems,
+  officeCost,
+  type Placed,
   PODIUM_COINS,
   type Side,
+  STARTER_OFFICE,
 } from "@tokenmaxxing/core/shop.ts";
 import { UserError } from "rivetkit";
 import { all, one, type Sql, type TxSql } from "../actors/shared.ts";
@@ -203,6 +206,55 @@ export async function buy(sql: Sql, userId: number, item: Item, now: number): Pr
     item.price,
     now,
   );
+  return wallet(sql, userId, now);
+}
+
+export interface Office {
+  furniture: Placed[];
+  open: boolean;
+}
+
+/** Every saved office (or only `userId`'s), by owner. */
+export async function offices(sql: Sql, userId: number | null = null): Promise<Record<number, Office>> {
+  const rows = await all<{ userId: number; furniture: string; open: number }>(
+    sql,
+    "SELECT user_id AS userId, furniture, open FROM offices WHERE ? IS NULL OR user_id = ?",
+    userId,
+    userId,
+  );
+  return Object.fromEntries(
+    rows.map((r) => [r.userId, { furniture: JSON.parse(r.furniture), open: !!r.open }]),
+  );
+}
+
+/** Someone's office; one that was never saved is new: `STARTER_OFFICE`, open. */
+export const officeOf = async (sql: Sql, userId: number): Promise<Office> =>
+  (await offices(sql, userId))[userId] ?? { furniture: [...STARTER_OFFICE], open: true };
+
+/**
+ * Saves `userId`'s furniture and pays for every piece there's more of (moving is free, removing
+ * refunds nothing). Run it serialized, like `buy`.
+ */
+export async function furnish(sql: Sql, userId: number, furniture: Placed[], now: number): Promise<Wallet> {
+  const cost = officeCost((await officeOf(sql, userId)).furniture, furniture);
+  if ((await wallet(sql, userId, now)).balance < cost)
+    throw new UserError("Not enough coins yet.", { code: "too_poor" });
+  // The furniture first: if the ledger write fails, it was free rather than paid for and lost.
+  await sql.execute(
+    `INSERT INTO offices (user_id, furniture, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET furniture = excluded.furniture, updated_at = excluded.updated_at`,
+    userId,
+    JSON.stringify(furniture),
+    now,
+  );
+  if (cost > 0)
+    await sql.execute(
+      "INSERT INTO ledger (user_id, amount, kind, ref, at) VALUES (?, ?, 'furniture', ?, ?)",
+      userId,
+      -cost,
+      `office:${userId}`,
+      now,
+    );
   return wallet(sql, userId, now);
 }
 

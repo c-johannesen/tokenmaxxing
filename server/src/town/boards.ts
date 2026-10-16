@@ -1,7 +1,7 @@
 import { type Badge, badgesFor, streakOf } from "@tokenmaxxing/core/badges.ts";
 import { levelFor, levelTitle } from "@tokenmaxxing/core/format.ts";
 import { addDays, dayKey, type RangeKey, rangeDays } from "@tokenmaxxing/core/range.ts";
-import { isTradeable } from "@tokenmaxxing/core/shop.ts";
+import { isTradeable, OFFICE_LEVEL } from "@tokenmaxxing/core/shop.ts";
 import { type Brand, houseTier, type Look } from "@tokenmaxxing/core/world.ts";
 import { UserError } from "rivetkit";
 import { all, one, pricing, type Sql } from "../actors/shared.ts";
@@ -16,7 +16,7 @@ import {
   totals,
   type UsageRow,
 } from "../stats.ts";
-import { ownedItems, podiumDays } from "./coins.ts";
+import { officeOf, ownedItems, podiumDays } from "./coins.ts";
 import { COMPANY_COLS, type CompanyRow, companyById, companyInfos } from "./companies.ts";
 import { type GameStats, gameStats } from "./games.ts";
 import { lookOf, TOKENS, tokensIn, USER_COLS, type UserRow, userById } from "./users.ts";
@@ -88,6 +88,8 @@ export interface Profile {
   badges: Badge[];
   /** Shop items they could trade away. */
   owned: string[];
+  /** Null without one: under `OFFICE_LEVEL`, or not in a company. */
+  office: "open" | "closed" | null;
 }
 
 /** The HUD's corner: my numbers today, and today's top 5 (with me pinned below when I'm not in it). */
@@ -235,6 +237,7 @@ export async function profile(sql: Sql, userId: number, range: RangeKey, now: nu
     games,
     badges,
     owned: (await ownedItems(sql, userId)).filter(isTradeable),
+    office: level < OFFICE_LEVEL || !company ? null : (await officeOf(sql, userId)).open ? "open" : "closed",
   };
 }
 

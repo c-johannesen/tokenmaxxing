@@ -4,7 +4,18 @@
  */
 import type { Seat, Spot } from "./games/gather.ts";
 import type { BoardRow, GameId } from "./games/types.ts";
-import { blockOf, doorOf, type GameMap, MAPS, type MapId, plotId, TOWN_SPAWN } from "./maps.ts";
+import {
+  blockOf,
+  doorOf,
+  type GameMap,
+  MAPS,
+  type MapId,
+  OFFICES,
+  plotId,
+  setOffice,
+  TOWN_SPAWN,
+} from "./maps.ts";
+import { type Placed, STARTER_OFFICE } from "./shop.ts";
 
 export const TILE = 16;
 /** Client animation time per step; the server only enforces the running pace. */
@@ -25,7 +36,7 @@ export const COMPANY_CAP = 50;
 export type Facing = "up" | "down" | "left" | "right";
 /** `playing`: at a game table in town, until the match ends (see core/src/games/gather.ts). */
 export type PlayerState = "idle" | "sit" | "away" | "working" | "playing";
-export type RoomId = "town" | "inn" | `hq:${number}`;
+export type RoomId = "town" | "inn" | `hq:${number}` | `office:${number}`;
 
 export const DIRS: Record<Facing, [number, number]> = {
   up: [0, -1],
@@ -35,9 +46,17 @@ export const DIRS: Record<Facing, [number, number]> = {
 };
 export const isFacing = (v: unknown): v is Facing => typeof v === "string" && v in DIRS;
 
-export const mapOf = (room: RoomId): GameMap => MAPS[room.startsWith("hq:") ? "hq" : (room as MapId)];
 export const companyOfRoom = (room: RoomId): number | null =>
   room.startsWith("hq:") ? Number(room.slice(3)) : null;
+export const ownerOfOffice = (room: RoomId): number | null =>
+  room.startsWith("office:") ? Number(room.slice(7)) : null;
+
+/** An office nobody has furnished yet holds `STARTER_OFFICE`. */
+export function mapOf(room: RoomId): GameMap {
+  const owner = ownerOfOffice(room);
+  if (owner !== null) return OFFICES.get(owner) ?? setOffice(owner, STARTER_OFFICE);
+  return MAPS[room.startsWith("hq:") ? "hq" : (room as MapId)];
+}
 
 // MARK: Looks
 
@@ -199,6 +218,9 @@ export interface Snapshot {
   houses: Houses;
   /** Games being played in town, with their tables or arenas. */
   games: WorldGame[];
+  /** Only in an office: its furniture, and whose it is (for the banner). */
+  furniture: Placed[] | null;
+  owner: { id: number; name: string } | null;
 }
 
 /** A game on show in town: where its table (or arena) is, who's at it, and how it's going. */
@@ -326,15 +348,23 @@ export function outsideDoor(plot: number | "inn"): Place {
 }
 
 /**
- * Where the portal at (x, y) takes a player, or why it doesn't. `plots` maps a plot to the company
- * holding it.
+ * Where the portal at (x, y) takes player `userId`, or why it doesn't. `plots` maps a plot to the
+ * company holding it. The office door takes everyone to their own office (the level gate is the
+ * world's); leaving an office goes back to your own company's building.
  */
 export function portal(
   room: RoomId,
   door: { ch: string; x: number; y: number },
   companyId: number | null,
   plots: ReadonlyMap<number, { id: number; name: string }>,
+  userId: number,
 ): Place | { notice: string } {
+  if (door.ch === "R") return roomEntry(`office:${userId}`);
+  if (ownerOfOffice(room) !== null) {
+    if (companyId === null) return roomEntry("inn");
+    const [x, y] = MAPS.hq.find("R")[0]!;
+    return { room: `hq:${companyId}`, x, y: y + 1, facing: "down" };
+  }
   if (room === "town") {
     if (door.ch === "I") return roomEntry("inn");
     const holder = plots.get(plotId(...blockOf(door.x, door.y)));

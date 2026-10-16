@@ -5,11 +5,13 @@ import {
   type GameMap,
   LEGEND,
   MAPS,
+  officeMap,
   plotBlock,
   plotId,
   TOWN_SPAWN,
   townMap,
 } from "../src/maps.ts";
+import { STARTER_OFFICE } from "../src/shop.ts";
 import { roomEntry } from "../src/world.ts";
 
 /** Tiles you can walk onto or stand next to (to sit, read or open a door) from (x, y). */
@@ -82,4 +84,17 @@ describe("maps", () => {
       for (const ch of ["b", "c"]) for (const t of map.find(ch)) expect(seen.has(t.join(","))).toBe(true);
     });
   }
+
+  test("offices: the starter desk has its chair in front, a TV takes two tiles, the door is in hq only", () => {
+    const office = officeMap(STARTER_OFFICE);
+    const [dx, dy] = office.find("d")[0]!;
+    expect(office.at(dx, dy + 1)).toBe("c");
+    const tv = officeMap([{ ch: "t", x: 2, y: 1 }]);
+    expect([tv.at(2, 1), tv.at(3, 1), tv.at(4, 1)]).toEqual(["t", "t", "_"]);
+    expect(MAPS.office.find("d")).toEqual([]); // the template stays bare
+    const [rx, ry] = MAPS.hq.find("R")[0]!;
+    expect(MAPS.hq.kind(rx, ry).portal).toBe(true);
+    expect(MAPS.hq.walkable(rx, ry + 1)).toBe(true);
+    expect(MAPS.inn.find("R")).toEqual([]);
+  });
 });

@@ -22,6 +22,7 @@ const COLORS: Record<string, string> = {
   _: C.floor,
   "=": C.rug,
   x: C.rugLight,
+  R: C.rugLight,
 };
 
 const bases = new WeakMap<GameMap, HTMLCanvasElement>();

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { BOTS } from "@tokenmaxxing/core/bots.ts";
 import { MAPS } from "@tokenmaxxing/core/maps.ts";
+import { STARTER_OFFICE } from "@tokenmaxxing/core/shop.ts";
 import {
   type ChatLine,
   cupsLeft,
@@ -10,7 +11,7 @@ import {
   route,
   type Snapshot,
 } from "@tokenmaxxing/core/world.ts";
-import { admit, as, event, eventually, signUp } from "./rivet.ts";
+import { admit, as, event, eventually, signUp, veteran } from "./rivet.ts";
 
 async function connect(token: string) {
   const conn = as(token).world.connect();
@@ -195,5 +196,39 @@ describe("world", () => {
       expect(moved.filter((m) => m[0] === a.userId).at(-1)?.[4]).toBe("working");
     });
     await v.conn.dispose();
+  });
+
+  test("the office door is locked below level 10", async () => {
+    const a = await signUp("door");
+    await a.town.createCompany("Doors");
+    const { conn, snap } = await connect(a.token);
+    const me = snap.players.find((p) => p.id === a.userId)!;
+    const results = await walk(conn, route(MAPS.hq, [me.x, me.y], MAPS.hq.find("R")[0]!)!);
+    expect(results.at(-1)).toEqual({ notice: "🔒 Your own office opens at level 10." });
+    await conn.dispose();
+  });
+
+  test("anyone visits an open office from its owner's card; a closed one lets only its owner in", async () => {
+    const owner = await signUp("office");
+    await owner.town.createCompany("Tower");
+    await veteran(owner);
+    const guest = await signUp("office");
+    const g = await connect(guest.token);
+    const room = `office:${owner.userId}` as const;
+    expect(await g.conn.visit(owner.userId)).toMatchObject({ room });
+    const inside = await eventually(() => {
+      const snap = g.events.snapshots.at(-1)!;
+      expect(snap.room).toBe(room);
+      return snap;
+    });
+    expect(inside.furniture).toEqual([...STARTER_OFFICE]);
+    expect(inside.owner).toEqual({ id: owner.userId, name: owner.name });
+
+    await owner.town.setOfficeOpen(false);
+    expect(await g.conn.visit(owner.userId)).toEqual({ notice: `🔒 ${owner.name}'s office is closed.` });
+    expect((await guest.town.profile(owner.userId, "7d")).office).toBe("closed");
+    const o = await connect(owner.token);
+    expect(await o.conn.visit(owner.userId)).toMatchObject({ room });
+    for (const c of [g, o]) await c.conn.dispose();
   });
 });

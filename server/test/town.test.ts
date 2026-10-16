@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { frontier, plotId } from "@tokenmaxxing/core/maps.ts";
-import { ITEMS } from "@tokenmaxxing/core/shop.ts";
+import { ITEMS, STARTER_OFFICE } from "@tokenmaxxing/core/shop.ts";
 import type { Notice } from "@tokenmaxxing/core/world.ts";
-import { admin, admit, as, client, event, eventually, MIN, rich, signUp } from "./rivet.ts";
+import { admin, admit, as, client, event, eventually, MIN, rich, signUp, veteran } from "./rivet.ts";
 
 describe("accounts", () => {
   test("names are unique and validated", async () => {
@@ -375,5 +375,28 @@ describe("trades", () => {
     await eventually(() => expect(got).toContainEqual({ text: `${bo.name} passed on your trade.` }));
     expect((await ada.town.trades()).outgoing).toBeNull();
     await conn.dispose();
+  });
+});
+
+describe("offices", () => {
+  test("from level 10, in a company; every new piece costs coins", async () => {
+    const sofa = { ch: "s", x: 1, y: 1 };
+    const low = await signUp("office");
+    await low.town.createCompany("Ground Floor");
+    await expect(low.town.setOffice([...STARTER_OFFICE])).rejects.toThrow("level 10");
+    const freelancer = await signUp("office");
+    await veteran(freelancer);
+    await expect(freelancer.town.setOffice([...STARTER_OFFICE])).rejects.toThrow("company");
+
+    const a = await signUp("office");
+    await a.town.createCompany("Top Floor");
+    await veteran(a);
+    await admin().adminSetCoins(a.userId, 150);
+    await expect(a.town.setOffice([{ ch: "s", x: 0, y: 1 }])).rejects.toThrow("fit"); // the wall
+    expect((await a.town.setOffice([...STARTER_OFFICE, sofa])).balance).toBe(50);
+    expect((await a.town.wallet()).balance).toBe(50);
+    expect(await a.town.office(a.userId)).toMatchObject({ furniture: [...STARTER_OFFICE, sofa], open: true });
+    // Furniture is paid for, not held like a stake: the account can still be deleted.
+    await admin().adminDeleteUser(a.userId);
   });
 });

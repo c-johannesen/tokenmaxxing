@@ -3,6 +3,7 @@ import type { Client } from "rivetkit/client";
 import type { registry } from "../actors/registry.ts";
 import { main, type Sql } from "../actors/shared.ts";
 import { brandFor } from "../brand.ts";
+import { officeOf } from "./coins.ts";
 import { type Changed, companyInfos } from "./companies.ts";
 import { playerCores } from "./users.ts";
 
@@ -25,6 +26,12 @@ export async function push(sql: Sql, client: Client<typeof registry>, changed: C
     else await world.removeCompany(id);
   }
   await pushPlayers(sql, client, [...new Set(changed.users)]);
+}
+
+/** Someone's office, as saved: whoever is inside sees it change. */
+export async function pushOffice(sql: Sql, client: Client<typeof registry>, userId: number): Promise<void> {
+  const o = await officeOf(sql, userId);
+  await main(client).world.setOffice(userId, o.furniture, o.open);
 }
 
 /** Reads the website and stores the house's colours and logo, unless the website changed meanwhile. */
