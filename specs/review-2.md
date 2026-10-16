@@ -158,6 +158,43 @@ A line each, no rewriting:
   `−price` ledger row. Add one As built line to each: superseded by `specs/inventory.md` (furniture from
   the bag, placing free; trades move `items` rows, no ledger row for items).
 
+## 8. From the browser test of inventory and drops
+
+All eleven scenarios passed and no functional bug was found (report in the session; screenshots under
+`/tmp/tmtest2/shots/`). These are the observations worth a small change, in priority order. Each is a
+few lines.
+
+a. **The office editor doesn't know about drops on the floor.** A visitor's sofa dropped in your office
+   shows as "Empty floor"; you can place a rug on it, Save accepts, and the world keeps drawing the sofa
+   until it's taken. A blocking piece placed there would read as a seat until then. Fix, both sides: the
+   editor (`web/src/hud/OfficePanel.tsx`) treats a tile with a drop (`world.drops` for the room) as taken,
+   labelled with the drop's name and not placeable; and the world's internal `setOffice`
+   (`server/src/actors/world.ts`) moves any drop that now sits on a non-floor tile to the nearest free
+   one with the same `findSpot` `placeDrop` uses, so the two overlays can't disagree.
+
+b. **The level-up toast opens the Shop; the reward now lives in the Bag.** `LevelToast` in
+   `web/src/hud/Hud.tsx`: open `{ kind: "bag" }`.
+
+c. **An open Trade panel goes stale after the trade settles**: the balance updates but "You give" still
+   shows the old counts. `TradePanel` in `web/src/hud/Trades.tsx`: refetch the bag and the other side's
+   tradeables every 10 s while open, the way `TradesPanel` already polls.
+
+d. **The Bag keeps the last notice beside a new error.** A refused sixth drop shows "Dropped the Rug."
+   above the red error. `web/src/hud/Bag.tsx`: clear the notice when a call fails.
+
+e. **The editor opens on Rug** and says "None left in your bag" before you've done anything. Default
+   the tool to the first piece you hold, or ✕ Remove when you hold none.
+
+f. **Two messages.** `offerTrade` refuses a reward with the generic "Up to 🪙 500 and 4 shop items a
+   side." (only reachable through the API, but say it: check `isTradeable` before `parseSide` and answer
+   "Level rewards stay with you."). `setLook` says "Buy it in the shop first." when your only copy is on
+   the floor or placed; "You don't have one in your bag." fits both the old and the new case.
+
+Not changing, from the same run: a drop's name sign can overlap a nearby name chip; a bed next to
+dropped rugs takes the rug's ground colour (`groundAt` picks the most common neighbour); the
+"unhandled action promise rejection" console line on an expected refusal; the Rivet alarm log line when a
+player actor sleeps. All cosmetic or pre-existing.
+
 ## Done when
 
 - `bun run typecheck`, `bun run lint` and `bun run test` pass.
@@ -169,4 +206,6 @@ A line each, no rewriting:
 - Item 3: the existing drop tests (town and world) pass unchanged.
 - Item 4: the ledger backfill test adjusted as above.
 - Items 5 to 7 need no tests (a sprite, an action's signature with its one test updated, docs).
+- Item 8a: a `world.test.ts` case: a drop in an office, then `setOffice` placing a desk on its tile, and the
+  drop is on another floor tile afterwards. 8b to 8f need no tests.
 - One commit on `feat/netstationen`, no attribution lines.
