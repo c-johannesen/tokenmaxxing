@@ -156,8 +156,7 @@ World state (`server/src/actors/world.ts`): `drops?: Record<string, Drop>` with
 ## Tests
 
 - `server/test/ledger.test.ts`: buy twice gives two rows and one spend upsert; a trade moves one row and
-  leaves the balance alone; a placed piece can't be traded; `grantRewards` is idempotent and never regrants
-  a traded… never regrants at all (rewards can't leave); the backfill is idempotent and turns office
+  leaves the balance alone; a placed piece can't be traded; `grantRewards` is idempotent (a second call grants nothing); the backfill is idempotent and turns office
   pieces into placed rows.
 - `server/test/town.test.ts`: `report` crossing 10B grants the top hat; `setLook` accepts a traded-in
   Duck; `drop` of a reward is refused, of a worn hat un-wears, of a sixth drop is refused; `pickUp` with a
