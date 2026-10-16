@@ -95,3 +95,66 @@ export function setOffice(userId: number, furniture: readonly Placed[]): GameMap
   OFFICES.set(userId, map);
   return map;
 }
+
+// MARK: Doors
+
+/** A door in a company building: whose office, where, and whether it's open (the client draws a 🔒). */
+export interface Door {
+  userId: number;
+  name: string;
+  open: boolean;
+  x: number;
+  y: number;
+}
+export const DOORS_PER_HALLWAY = 10;
+/** The gap up through the walls from the floor to every hallway: between two doors. */
+const PASSAGE_X = 14;
+
+/**
+ * Door slots for these owners (sorted by id): slot n is hallway ⌊n/10⌋, tile 1 + 2·(n mod 10).
+ * ponytail: packed, not stored, so when a door goes the later ones move down a slot; store slots if
+ * people mind their door moving.
+ */
+export function doorsFor(owners: readonly Omit<Door, "x" | "y">[]): Door[] {
+  return [...owners]
+    .sort((a, b) => a.userId - b.userId)
+    .map((o, n) => ({
+      ...o,
+      x: 1 + 2 * (n % DOORS_PER_HALLWAY),
+      y: -3 * Math.floor(n / DOORS_PER_HALLWAY) - 2,
+    }));
+}
+
+/**
+ * The building with a hallway of doors per 10 offices, above today's floor (negative y, like the town),
+ * so every tile it had keeps its coordinates. A hallway is a wall top, a wall face with the doors, and a
+ * corridor.
+ */
+export function hqMap(doors: readonly Door[]): GameMap {
+  const floor = MAPS.hq;
+  const y0 = Math.min(0, ...doors.map((d) => d.y - 1));
+  const hall = ["W".repeat(floor.width), "W".repeat(floor.width), `W${"_".repeat(floor.width - 2)}W`];
+  const rows = [...Array.from({ length: -y0 }, (_, i) => hall[i % 3]!), ...floor.rows].map((r) => [...r]);
+  for (const d of doors) rows[d.y - y0]![d.x] = "R";
+  for (let y = y0 + 3; y < 2; y++) rows[y - y0]![PASSAGE_X] = "_";
+  return new GameMap(
+    "hq",
+    floor.name,
+    rows.map((r) => r.join("")),
+    0,
+    y0,
+  );
+}
+
+/** Each company's building. ponytail: one process holds every building it has seen, like the offices. */
+export const HQS = new Map<number, GameMap>();
+
+export function setHq(companyId: number, doors: readonly Door[]): GameMap {
+  const map = hqMap(doors);
+  HQS.set(companyId, map);
+  return map;
+}
+
+/** The door at (x, y) in a building, if any. */
+export const doorAt = (doors: readonly Door[], x: number, y: number): Door | undefined =>
+  doors.find((d) => d.x === x && d.y === y);

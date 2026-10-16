@@ -1,8 +1,9 @@
 import { type GameMap, setTown } from "@tokenmaxxing/core/maps.ts";
-import { setOffice } from "@tokenmaxxing/core/office.ts";
+import { type Door, setHq, setOffice } from "@tokenmaxxing/core/office.ts";
 import {
   type ChatLine,
   type CompanyInfo,
+  companyOfRoom,
   defaultLook,
   type Facing,
   type Houses,
@@ -63,6 +64,8 @@ export const world = {
   tableBubbles: new Map<number, { text: string; until: number }>(),
   /** In an office: whose it is. */
   owner: null as Snapshot["owner"],
+  /** In a building: its office doors, with the names drawn over them. */
+  doors: [] as Door[],
 };
 
 /** Someone's look: as seen in the world, or their default while they're not in it. */
@@ -105,6 +108,9 @@ export function loadSnapshot(s: Snapshot): void {
   setCompanies(s.companies);
   const owner = ownerOfOffice(s.room);
   if (owner !== null && s.furniture) setOffice(owner, s.furniture);
+  const company = companyOfRoom(s.room);
+  if (company !== null) setHq(company, s.doors);
+  world.doors = s.doors;
   showMap(s.room);
   const bubbles = new Map([...world.avatars].map(([id, a]) => [id, a.bubble]));
   world.avatars = new Map(

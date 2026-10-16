@@ -9,7 +9,18 @@ import {
 } from "@tokenmaxxing/core/games/gather.ts";
 import type { GameId } from "@tokenmaxxing/core/games/types.ts";
 import { setTown, TOWN_SPAWN } from "@tokenmaxxing/core/maps.ts";
-import { OFFICE_LEVEL, OFFICES, type Placed, STARTER_OFFICE, setOffice } from "@tokenmaxxing/core/office.ts";
+import {
+  type Door,
+  doorAt,
+  doorsFor,
+  HQS,
+  OFFICE_LEVEL,
+  OFFICES,
+  type Placed,
+  STARTER_OFFICE,
+  setHq,
+  setOffice,
+} from "@tokenmaxxing/core/office.ts";
 import {
   CHAT_HISTORY,
   type ChatLine,
@@ -203,6 +214,7 @@ export const world = actor({
     placeBots(c.state);
     buildTown(c.state);
     for (const [id, o] of Object.entries(c.state.offices ?? {})) setOffice(Number(id), o.furniture);
+    for (const id of Object.keys(c.state.companies)) buildHq(c.state, Number(id));
   },
   onDisconnect: (c, conn) => {
     const s = conn.state as ConnState;
@@ -277,9 +289,11 @@ export const world = actor({
         return null;
       }
       if (target.kind === "blocked") return wasSeated ? correction(p) : null;
-      if (target.ch === "R" && p.level < OFFICE_LEVEL)
-        return { notice: `🔒 Your own office opens at level ${OFFICE_LEVEL}.` };
-      const dest = portal(p.room, target, p.companyId, plots(c.state), p.id);
+      const doors = p.companyId === null ? [] : doorsOf(c.state, p.companyId);
+      const door = target.ch === "R" ? doorAt(doors, target.x, target.y) : undefined;
+      if (door && door.userId !== p.id && !door.open)
+        return { notice: `🔒 ${door.name}'s office is closed.` };
+      const dest = portal(p.room, target, p.companyId, plots(c.state), doors);
       if ("notice" in dest) return { notice: dest.notice };
       Object.assign(p, dest);
       return correction(p);
@@ -485,9 +499,10 @@ export const world = actor({
       sendToRoom(c, "town", "game", g);
     },
 
-    setPlayer: (c, core: PlayerCore): void => {
+    setPlayer: async (c, core: PlayerCore): Promise<void> => {
       requireInternal(c.conn.state);
       const before = c.state.players[core.id]?.companyId;
+      const hadDoor = doorKey(c.state.players[core.id]);
       const p = upsert(c.state, core, Date.now());
       const online = c.vars.online.has(p.id);
       if (before !== undefined && before !== p.companyId) {
@@ -502,10 +517,13 @@ export const world = actor({
         c.vars.dirty.add(p.id);
       }
       c.broadcast("info", info(p, online));
+      // A door came, went or was renamed: in the old building and the new one.
+      if (doorKey(p) !== hadDoor)
+        for (const id of new Set([before, p.companyId])) if (id != null) await rebuildHq(c, id);
     },
 
     /** From `town`, when an admin deletes an account: out of the world, and their tabs closed. */
-    removePlayer: (c, userId: number): void => {
+    removePlayer: async (c, userId: number): Promise<void> => {
       requireInternal(c.conn.state);
       // Their office goes too; anyone inside stays until they leave.
       delete c.state.offices?.[userId];
@@ -520,6 +538,7 @@ export const world = actor({
         const s = conn.state as ConnState;
         if (s.kind === "user" && s.userId === userId) void conn.disconnect("deleted");
       }
+      if (p.companyId !== null) await rebuildHq(c, p.companyId);
     },
 
     setCompany: (c, company: CompanyInfo): void => {
@@ -529,21 +548,25 @@ export const world = actor({
       c.broadcast("companies", Object.values(c.state.companies));
     },
 
-    removeCompany: (c, id: number): void => {
+    removeCompany: async (c, id: number): Promise<void> => {
       requireInternal(c.conn.state);
       delete c.state.companies[id];
       buildTown(c.state, c.vars.dirty);
+      await rebuildHq(c, id);
       c.broadcast("companies", Object.values(c.state.companies));
     },
 
     /** From `town`: an office saved, opened or closed. Whoever is inside sees it; closing throws nobody out. */
     setOffice: async (c, userId: number, furniture: Placed[], open: boolean): Promise<void> => {
       requireInternal(c.conn.state);
+      const opened = officeOf(c.state, userId).open !== open;
       c.state.offices ??= {};
       c.state.offices[userId] = { furniture, open };
       setOffice(userId, furniture);
-      for (const p of Object.values(c.state.players))
-        if (p.room === `office:${userId}`) await sendSnapshot(c, p);
+      await resend(c, `office:${userId}`);
+      // The 🔒 on their door.
+      const companyId = c.state.players[userId]?.companyId;
+      if (opened && companyId != null) await resend(c, `hq:${companyId}`);
     },
 
     /** From `town`: a line for one player's open tabs (a company application, a trade, an answer). */
@@ -619,6 +642,36 @@ function buildTown(s: WorldState, dirty?: Set<number>): void {
     const tile = where?.room === "town" && !p.arena ? town.kind(where.x, where.y) : null;
     if (!tile || tile.walk || tile.seat) continue;
     Object.assign(where!, townSpawn());
+    dirty?.add(p.id);
+  }
+}
+
+/** The doors in a company's building: its members from `OFFICE_LEVEL`, by id. */
+const doorsOf = (s: WorldState, companyId: number): Door[] =>
+  doorsFor(
+    Object.values(s.players)
+      .filter((p) => p.companyId === companyId && p.level >= OFFICE_LEVEL)
+      .map((p) => ({ userId: p.id, name: p.name, open: officeOf(s, p.id).open })),
+  );
+
+/** What puts a door in a building: their company and name, from level 10. */
+const doorKey = (p?: PlayerCore) =>
+  p && p.companyId !== null && p.level >= OFFICE_LEVEL ? `${p.companyId}:${p.name}` : "";
+
+/**
+ * Rebuilds a company's building for its doors (a closed company's goes). Like `buildTown`, anyone now
+ * inside a wall (a hallway that went) goes back to the entry.
+ */
+function buildHq(s: WorldState, companyId: number, dirty?: Set<number>): void {
+  const room = `hq:${companyId}` as const;
+  if (s.companies[companyId]) setHq(companyId, doorsOf(s, companyId));
+  else HQS.delete(companyId);
+  const map = mapOf(room);
+  for (const p of Object.values(s.players)) {
+    const where = p.state === "away" || p.state === "working" ? p.back : p;
+    const tile = where?.room === room ? map.kind(where.x, where.y) : null;
+    if (!tile || tile.walk || tile.seat) continue;
+    Object.assign(where!, roomEntry(room));
     dirty?.add(p.id);
   }
 }
@@ -863,6 +916,7 @@ async function snapshot(
   chat: Promise<ChatLine[]>,
 ): Promise<Snapshot> {
   const owner = ownerOfOffice(self.room);
+  const companyId = companyOfRoom(self.room);
   return {
     room: self.room,
     selfId: self.id,
@@ -876,6 +930,7 @@ async function snapshot(
     games: Object.values(s.games ?? {}),
     furniture: owner === null ? null : officeOf(s, owner).furniture,
     owner: owner === null ? null : { id: owner, name: s.players[owner]?.name ?? "Someone" },
+    doors: companyId === null ? [] : doorsOf(s, companyId),
   };
 }
 
@@ -925,6 +980,17 @@ async function sendSnapshot(c: Sender & { vars: Vars; db: Sql }, p: WorldPlayer)
     const s = conn.state as ConnState;
     if (s.kind === "user" && s.joined && s.userId === p.id) conn.send("snapshot", snap);
   }
+}
+
+/** Everyone in `room` gets it whole again: what's in it changed. */
+async function resend(c: Sender & { vars: Vars; db: Sql }, room: RoomId): Promise<void> {
+  for (const p of Object.values(c.state.players)) if (p.room === room) await sendSnapshot(c, p);
+}
+
+/** A company's doors changed: rebuild its building, and everyone inside sees it. */
+async function rebuildHq(c: Sender & { vars: Vars; db: Sql }, companyId: number): Promise<void> {
+  buildHq(c.state, companyId, c.vars.dirty);
+  await resend(c, `hq:${companyId}`);
 }
 
 /** One tick: batched moves per room, and head counts when they change. */

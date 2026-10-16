@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { doorOf, MAPS, plotId, townMap } from "../src/maps.ts";
+import { doorsFor } from "../src/office.ts";
 import { addDays, dayKey, rangeDays } from "../src/range.ts";
 import {
   CUP_MS,
@@ -67,22 +68,32 @@ describe("portals", () => {
   const exit = { ch: "x", x: 0, y: 0 };
 
   test("your own house lets you in; others are locked; an empty one says so", () => {
-    expect(portal("town", door, 7, plots, 1)).toEqual(roomEntry("hq:7"));
-    expect(portal("town", door, 8, plots, 1)).toEqual({ notice: "🔒 Arox's house. Members only." });
-    expect("notice" in portal("town", door, 7, new Map(), 1)).toBe(true);
+    expect(portal("town", door, 7, plots)).toEqual(roomEntry("hq:7"));
+    expect(portal("town", door, 8, plots)).toEqual({ notice: "🔒 Arox's house. Members only." });
+    expect("notice" in portal("town", door, 7, new Map())).toBe(true);
   });
 
   test("leaving a house puts you outside its door; the Inn works for everyone", () => {
-    expect(portal("hq:7", exit, 7, plots, 1)).toEqual({ room: "town", x, y: y + 1, facing: "down" });
-    expect(portal("town", { ch: "I", x: 13, y: 14 }, null, plots, 1)).toEqual(roomEntry("inn"));
-    expect(portal("inn", exit, null, plots, 1)).toEqual(outsideDoor("inn"));
+    expect(portal("hq:7", exit, 7, plots)).toEqual({ room: "town", x, y: y + 1, facing: "down" });
+    expect(portal("town", { ch: "I", x: 13, y: 14 }, null, plots)).toEqual(roomEntry("inn"));
+    expect(portal("inn", exit, null, plots)).toEqual(outsideDoor("inn"));
   });
 
-  test("the office door takes you to your own office; its exit to your own building, or the Inn", () => {
-    const [rx, ry] = MAPS.hq.find("R")[0]!;
-    expect(portal("hq:3", { ch: "R", x: rx, y: ry }, 3, plots, 5)).toEqual(roomEntry("office:5"));
-    expect(portal("office:7", exit, 3, plots, 5)).toEqual({ room: "hq:3", x: rx, y: ry + 1, facing: "down" });
-    expect(portal("office:7", exit, null, plots, 5)).toEqual(roomEntry("inn"));
+  test("bo's door takes you to bo's office; its exit to below the door for a member, or the Inn", () => {
+    const doors = doorsFor([
+      { userId: 4, name: "ada", open: true },
+      { userId: 9, name: "bo", open: true },
+    ]);
+    const bo = doors[1]!;
+    expect(portal("hq:3", { ch: "R", x: bo.x, y: bo.y }, 3, plots, doors)).toEqual(roomEntry("office:9"));
+    expect(portal("office:9", exit, 3, plots, doors)).toEqual({
+      room: "hq:3",
+      x: bo.x,
+      y: bo.y + 1,
+      facing: "down",
+    });
+    expect(portal("office:9", exit, 3, plots, [])).toEqual(roomEntry("hq:3")); // no door: the entry
+    expect(portal("office:9", exit, null, plots, [])).toEqual(roomEntry("inn"));
   });
 });
 

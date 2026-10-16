@@ -223,10 +223,11 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   both sides under `serial` and moves everything in one transaction (`settleTrade`): coins through the
   `ledger` (kind `trade`), items by moving the `purchases` row to the receiver at price 0, with a ledger row
   of minus the price for the giver so their balance stays put. An item that leaves you comes off your look.
-- **Offices.** From level 10, every company member has one behind the `R` door in the company building
-  (`office:<userId>`, one map template plus their furniture). Furniture is the map legend's own pieces,
-  10 to 120 coins; placing costs, moving is free, removing refunds nothing. Open offices can be visited
-  from the owner's card.
+- **Offices.** From level 10, every company member has one behind a door with their name on it in the
+  company building (`office:<userId>`, one map template plus their furniture). The doors are in hallways of
+  10 above the building's floor (negative `y`, `hqMap`), which `world` rebuilds when a door comes or goes.
+  Furniture is the map legend's own pieces, 10 to 120 coins; placing costs, moving is free, removing refunds
+  nothing. Anyone in the building walks into an open office; from outside, from the owner's card.
 
 ## Games
 
