@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { itemById, STARTER_OFFICE } from "@tokenmaxxing/core/shop.ts";
+import { STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
+import { itemById } from "@tokenmaxxing/core/shop.ts";
 import type { TxSql } from "../src/actors/shared.ts";
 import {
   balances,

@@ -107,7 +107,10 @@ describe("pages", () => {
   });
 
   test("the page files aren't served without those headers", async () => {
-    for (const path of ["/index.html", "/admin.html"])
-      expect((await fetch(`${origin}${path}`)).status).not.toBe(200);
+    expect((await fetch(`${origin}/admin.html`)).status).not.toBe(200);
+    // With `site/dist` built, `/index.html` is the marketing site's; it mustn't be the game's.
+    const game = await (await fetch(`${origin}/play`)).text();
+    const index = await fetch(`${origin}/index.html`);
+    if (index.status === 200) expect(await index.text()).not.toBe(game);
   });
 });

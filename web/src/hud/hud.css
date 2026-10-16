@@ -976,7 +976,8 @@ input:focus {
   gap: 12px;
 }
 
-.trade-sides .pills {
+.trade-sides .pills,
+.office-tools .pills {
   flex-wrap: wrap;
 }
 

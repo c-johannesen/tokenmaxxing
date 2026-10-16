@@ -1,4 +1,4 @@
-import { levelFor } from "@tokenmaxxing/core/format.ts";
+import { officeCost, type Placed, STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
 import { type DayFacts, EMPTY_DAY, QUESTS, questCoins } from "@tokenmaxxing/core/quests.ts";
 import { addDays, dayKey } from "@tokenmaxxing/core/range.ts";
 import {
@@ -7,15 +7,12 @@ import {
   itemById,
   itemsIn,
   levelItems,
-  officeCost,
-  type Placed,
   PODIUM_COINS,
   type Side,
-  STARTER_OFFICE,
 } from "@tokenmaxxing/core/shop.ts";
 import { UserError } from "rivetkit";
 import { all, one, type Sql, type TxSql } from "../actors/shared.ts";
-import { lookOf, TOKENS, tokensIn, userById } from "./users.ts";
+import { levelOf, lookOf, TOKENS, userById } from "./users.ts";
 
 export interface Wallet {
   balance: number;
@@ -33,6 +30,12 @@ export const ownedItems = async (sql: Sql, userId: number): Promise<string[]> =>
   (await all<{ item: string }>(sql, "SELECT item FROM purchases WHERE user_id = ? ORDER BY at", userId)).map(
     (r) => r.item,
   );
+
+/** Shop item ids `userId` owns: bought, and earned by level. */
+export const ownedIds = async (sql: Sql, userId: number): Promise<string[]> => [
+  ...(await ownedItems(sql, userId)),
+  ...levelItems(await levelOf(sql, userId)).map((i) => i.id),
+];
 
 /**
  * Coins are worked out from usage every time rather than stored, so a late sync
@@ -80,13 +83,12 @@ export async function wallet(sql: Sql, userId: number, now: number): Promise<Wal
     wins.reduce((n, w) => n + w.coins, 0) +
     [...facts.values()].reduce((n, f) => n + questCoins(f), 0);
   const since = addDays(today, -29);
-  const lifetime = (await tokensIn(sql, [userId])).get(userId) ?? 0;
   const todays = facts.get(today) ?? EMPTY_DAY;
   return {
     balance: earned - (spent ?? 0) + (await ledgerSum(sql, userId)),
     today: coinsForTokens(days.find((d) => d.day === today)?.tokens ?? 0),
     wins: wins.filter((w) => w.day >= since),
-    owned: [...(await ownedItems(sql, userId)), ...levelItems(levelFor(lifetime)).map((i) => i.id)],
+    owned: await ownedIds(sql, userId),
     quests: QUESTS.map(({ done, ...q }) => ({ ...q, done: done(todays) })),
   };
 }

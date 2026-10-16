@@ -142,3 +142,9 @@ Every caller of `levelFor` (`boards.ts`, `users.ts`, `companies.ts`, `admin.ts`)
 ## Open questions
 
 - None that block. Names 13 to 29 and the three item names are yours to swap.
+
+## As built
+
+- The toast's office line is gated on having a company; without one it says
+  `· Join a company for your own office`.
+- `setLook` checks `ownedIds` (purchases and level items, two queries), not the whole `wallet`.

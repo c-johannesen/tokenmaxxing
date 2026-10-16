@@ -6,7 +6,7 @@ import {
   type Placed,
   parseOffice,
   pieceOf,
-} from "@tokenmaxxing/core/shop.ts";
+} from "@tokenmaxxing/core/office.ts";
 import { useEffect, useState } from "react";
 import { world } from "../game/world.ts";
 import { town } from "../net.ts";
@@ -22,6 +22,7 @@ const TOOLS = [
 /**
  * My office's editor. Changes stay here until Save, which pays for every piece there's more of;
  * the world keeps drawing the saved office until then.
+ * It opens with E facing a wall, or from the menu: nobody can face the door, a step goes through it.
  */
 export function OfficePanel() {
   const wallet = useHud((s) => s.wallet);
@@ -69,7 +70,9 @@ export function OfficePanel() {
           {saved.open ? "Anyone can visit from your player card." : "Only you get in, through the door."}
         </span>
       </p>
-      <Pills value={tool} options={TOOLS} onChange={setTool} />
+      <div className="office-tools">
+        <Pills value={tool} options={TOOLS} onChange={setTool} />
+      </div>
       <div
         className="plot-grid small"
         style={{ gridTemplateColumns: `repeat(${MAPS.office.width - 2}, 4.5em)`, gridAutoRows: "3em" }}

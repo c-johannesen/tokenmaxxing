@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { frontier, plotId } from "@tokenmaxxing/core/maps.ts";
-import { ITEMS, STARTER_OFFICE } from "@tokenmaxxing/core/shop.ts";
+import { STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
+import { ITEMS } from "@tokenmaxxing/core/shop.ts";
 import type { Notice } from "@tokenmaxxing/core/world.ts";
 import { admin, admit, as, client, event, eventually, MIN, rich, signUp, veteran } from "./rivet.ts";
 
@@ -326,6 +327,7 @@ describe("trades", () => {
     const bo = await rich("bo", 1000);
     await ada.town.buy("hat.1");
     await ada.town.setLook({ ...(await ada.town.me()).look, hat: 1 });
+    expect(await bo.town.tradeables(ada.userId)).toEqual({ name: ada.name, owned: ["hat.1"] });
     await ada.town.offerTrade(bo.userId, { coins: 0, items: ["hat.1"] }, coins(50));
     const offer = (await bo.town.trades()).incoming[0]!;
     expect(offer).toMatchObject({ from: ada.name, to: bo.name, want: coins(50) });

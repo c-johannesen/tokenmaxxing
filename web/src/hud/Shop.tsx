@@ -41,6 +41,15 @@ export function Shop() {
         <strong>🪙 {wallet.balance.toLocaleString()}</strong> coins
         <span className="muted"> · +{wallet.today} from today so far</span>
       </p>
+      <p className="muted small">
+        Every day you earn √(tokens ÷ 1M) coins: 100M tokens is 10, 1B is 31. Finish a day 1st, 2nd or 3rd for{" "}
+        {PODIUM_COINS.join(", ")} more.
+        {wallet.wins.length > 0 &&
+          ` Lately: ${wallet.wins
+            .slice(0, 5)
+            .map((w) => `${PLACES[w.place - 1]} ${w.day.slice(5)}`)
+            .join(" ")}`}
+      </p>
       <h3>📜 Today's quests</h3>
       <ul className="members">
         {wallet.quests.map((q) => (
@@ -52,15 +61,6 @@ export function Shop() {
           </li>
         ))}
       </ul>
-      <p className="muted small">
-        Every day you earn √(tokens ÷ 1M) coins: 100M tokens is 10, 1B is 31. Finish a day 1st, 2nd or 3rd for{" "}
-        {PODIUM_COINS.join(", ")} more.
-        {wallet.wins.length > 0 &&
-          ` Lately: ${wallet.wins
-            .slice(0, 5)
-            .map((w) => `${PLACES[w.place - 1]} ${w.day.slice(5)}`)
-            .join(" ")}`}
-      </p>
       <Pills value={tab} options={TABS} onChange={setTab} />
       <ul className="shop">
         {ITEMS.filter((i) => i.slot === tab).map((item) => {
