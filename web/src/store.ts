@@ -12,7 +12,7 @@ export type Panel =
   | { kind: "shop" }
   | { kind: "bag" }
   | { kind: "arcade" }
-  | { kind: "newTable"; invite?: number }
+  | { kind: "newTable"; invite?: number; inviteName?: string }
   | { kind: "match"; id: number }
   | { kind: "trade"; userId: number }
   | { kind: "trades" }

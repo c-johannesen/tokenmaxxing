@@ -8,7 +8,7 @@ import { itemFrame } from "../art/characters.ts";
 import { objectAt } from "../art/objects.ts";
 import { C } from "../art/palette.ts";
 import { petFrame } from "../art/pets.ts";
-import { refreshMe, town } from "../net.ts";
+import { errorText, refreshMe, town } from "../net.ts";
 import { hud, useHud } from "../store.ts";
 import { AvatarImage, Modal, Pills, useRun } from "./ui.tsx";
 
@@ -27,12 +27,14 @@ export function Shop() {
   const wallet = useHud((s) => s.wallet);
   const [tab, setTab] = useState<Item["slot"]>("outfit");
   const [bag, setBag] = useState<BagRow[]>([]);
+  const [failed, setFailed] = useState<string | null>(null);
   const { error, run } = useRun();
   useEffect(() => {
-    void town.wallet().then((w) => hud.set({ wallet: w }));
-    void town.bag().then(setBag);
+    const fail = (e: unknown) => setFailed(errorText(e));
+    void town.wallet().then((w) => hud.set({ wallet: w }), fail);
+    void town.bag().then(setBag, fail);
   }, []);
-  if (!me || !wallet) return <Modal title="🪙 Shop">Loading…</Modal>;
+  if (!me || !wallet) return <Modal title="🪙 Shop">{failed ?? "Loading…"}</Modal>;
 
   // The first one bought goes on; another is for trading.
   const buy = (item: Item) =>

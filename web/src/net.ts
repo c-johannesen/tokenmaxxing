@@ -119,6 +119,8 @@ export function connect(token: string): void {
   conn.on("notice", (n: Notice) => {
     hud.set({ notice: { ...n, at: Date.now() } });
     void refreshMe();
+    // A trade I offered settled: my coins and 🎒 moved (and an open Bag refetches).
+    void town.wallet().then((wallet) => hud.set({ wallet }));
   });
   conn.on("mention", (line: ChatLine) => hud.set({ mention: { line, at: Date.now() } }));
   conn.on("game", (g: WorldGame) => applyGame(g));

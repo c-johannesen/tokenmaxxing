@@ -1,5 +1,5 @@
 import { isBot } from "@tokenmaxxing/core/bots.ts";
-import { compact, levelTitle } from "@tokenmaxxing/core/format.ts";
+import { compact, levelTitle, plural } from "@tokenmaxxing/core/format.ts";
 import { levelItems } from "@tokenmaxxing/core/shop.ts";
 import { useEffect, useRef, useState } from "react";
 import { roomName, world } from "../game/world.ts";
@@ -128,7 +128,7 @@ function Stats() {
         type="button"
         className="icon"
         title="Bag"
-        aria-label={wallet ? `Bag: ${wallet.items} things` : "Bag"}
+        aria-label={wallet ? `Bag: ${plural(wallet.items, "thing")}` : "Bag"}
         onClick={() => hud.set({ panel: { kind: "bag" } })}
       >
         🎒{wallet && ` ${wallet.items}`}
@@ -199,7 +199,7 @@ function Panel() {
     case "arcade":
       return <ArcadePanel />;
     case "newTable":
-      return <NewTable invite={panel.invite} />;
+      return <NewTable invite={panel.invite} inviteName={panel.inviteName} />;
     case "match":
       return <MatchPanel id={panel.id} />;
     case "trade":

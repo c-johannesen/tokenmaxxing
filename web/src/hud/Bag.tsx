@@ -1,8 +1,8 @@
 import { itemById } from "@tokenmaxxing/core/shop.ts";
 import type { BagRow } from "@tokenmaxxing/server/registry";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { world } from "../game/world.ts";
-import { refreshMe, town } from "../net.ts";
+import { errorText, refreshMe, town } from "../net.ts";
 import { hud, useHud } from "../store.ts";
 import { ItemImage, WearButton } from "./Shop.tsx";
 import { Modal, useRun } from "./ui.tsx";
@@ -13,22 +13,32 @@ import { Modal, useRun } from "./ui.tsx";
  */
 export function Bag() {
   const me = useHud((s) => s.me);
+  const wallet = useHud((s) => s.wallet);
   const inMyOffice = useHud((s) => s.room === `office:${world.selfId}`);
   const [bag, setBag] = useState<BagRow[] | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const { error, run } = useRun();
+  const grid = useRef<HTMLUListElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new wallet (a trade, a drop) can mean a new bag
   useEffect(() => {
-    void town.bag().then(setBag);
-  }, []);
-  if (!me || !bag) return <Modal title="🎒 Bag">Loading…</Modal>;
+    void town.bag().then(setBag, (e) => setFailed(errorText(e)));
+  }, [wallet]);
+  if (!me || !bag) return <Modal title="🎒 Bag">{failed ?? "Loading…"}</Modal>;
 
   const drop = (item: string) =>
     run(async () => {
       setNotice(null); // a refused one shows only its error
-      setNotice((await town.drop(item)).notice);
-      setBag(await town.bag());
-      hud.set({ wallet: await town.wallet() }); // the count on 🎒
+      const r = await town.drop(item);
+      setNotice(r.notice);
+      if (r.drop) {
+        // One fewer on 🎒, and the new wallet refetches the bag.
+        hud.set((s) => ({ wallet: s.wallet && { ...s.wallet, items: s.wallet.items - 1 } }));
+        // The last one takes its Drop button with it: focus goes back to the dialog, not the page.
+        if (bag.find((b) => b.item === item)?.count === 1)
+          grid.current?.closest<HTMLElement>("[role=dialog]")?.focus();
+      }
       await refreshMe(); // a worn one comes off
     });
   // The last one dropped leaves nothing picked.
@@ -65,7 +75,7 @@ export function Bag() {
       )}
       {notice && <p className="muted">{notice}</p>}
       {error && <p className="error">{error}</p>}
-      <ul className="bag">
+      <ul className="bag" ref={grid}>
         {bag.map((b) => {
           const it = itemById(b.item);
           if (!it) return null;
@@ -76,7 +86,7 @@ export function Bag() {
                 type="button"
                 className={wearing ? "cell wearing" : "cell"}
                 aria-pressed={b.item === picked}
-                aria-label={`${it.name} ×${b.count}`}
+                aria-label={`${it.name} ×${b.count}${wearing ? ", wearing" : ""}${it.tradeable ? "" : ", reward"}`}
                 title={it.name}
                 onClick={() => setPicked(b.item)}
               >
