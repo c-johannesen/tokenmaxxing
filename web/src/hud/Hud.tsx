@@ -77,6 +77,10 @@ function Hints() {
         <dd>Jump</dd>
         <dt>E</dt>
         <dd>Interact</dd>
+        <dt>G</dt>
+        <dd>Take</dd>
+        <dt>Right-click</dt>
+        <dd>Go and take</dd>
         <dt>Enter</dt>
         <dd>Chat</dd>
         <dt>L</dt>

@@ -4,7 +4,9 @@ import {
   type ChatLine,
   type CompanyInfo,
   companyOfRoom,
+  type Drop,
   defaultLook,
+  dropCovers,
   type Facing,
   type Houses,
   type Moves,
@@ -17,6 +19,7 @@ import {
   type RoomId,
   RUN_STEP_MS,
   type Snapshot,
+  setDrops,
   WALK_STEP_MS,
   type WorldGame,
 } from "@tokenmaxxing/core/world.ts";
@@ -66,6 +69,8 @@ export const world = {
   owner: null as Snapshot["owner"],
   /** In a building: its office doors, with the names drawn over them. */
   doors: [] as Door[],
+  /** What's on the floor: furniture (drawn from the map) and parcels. */
+  drops: [] as Drop[],
 };
 
 /** Someone's look: as seen in the world, or their default while they're not in it. */
@@ -111,6 +116,8 @@ export function loadSnapshot(s: Snapshot): void {
   const company = companyOfRoom(s.room);
   if (company !== null) setHq(company, s.doors);
   world.doors = s.doors;
+  setDrops(s.room, s.drops);
+  world.drops = s.drops;
   showMap(s.room);
   const bubbles = new Map([...world.avatars].map(([id, a]) => [id, a.bubble]));
   world.avatars = new Map(
@@ -257,6 +264,26 @@ export function advanceRemotes(now: number): void {
 
 export const avatarAt = (x: number, y: number): Avatar | undefined =>
   [...world.avatars.values()].find((a) => a.x === x && a.y === y && a.info.id !== world.selfId);
+
+// MARK: Drops
+
+export const dropAt = (x: number, y: number): Drop | undefined =>
+  world.drops.find((d) => dropCovers(d, x, y));
+
+/** Dropped here, or taken: dropped furniture is in the map, so it's shown again. */
+export function applyDrop(d: Drop): void {
+  if (d.room === world.room) showDrops([...world.drops.filter((o) => o.id !== d.id), d]);
+}
+
+export function applyPickup(id: number): void {
+  if (world.drops.some((d) => d.id === id)) showDrops(world.drops.filter((d) => d.id !== id));
+}
+
+function showDrops(drops: Drop[]): void {
+  world.drops = drops;
+  setDrops(world.room, drops);
+  showMap(world.room);
+}
 
 // MARK: Games
 
