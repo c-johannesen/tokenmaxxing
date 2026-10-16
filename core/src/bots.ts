@@ -19,7 +19,7 @@ export interface BotDef {
   /** Said at random, one every `every[0]` to `every[1]` ms while someone is around to hear it. */
   lines: string[];
   every: [number, number];
-  /** The chance it follows someone online in town after a walk, instead of wandering. Default 0.3. */
+  /** The chance it follows someone online in town after a walk, instead of wandering. Default 0.08. */
   followChance?: number;
   /** Said to whoever it's following: `{name}` is their name, `{tokens}` their tokens today. */
   followLines?: string[];
@@ -169,7 +169,6 @@ export const BOTS: BotDef[] = [
       "💰🔥💰",
     ],
     every: [40_000, 120_000],
-    followChance: 0.6,
     followLines: [
       "@{name} kun {tokens} tokens i dag? Det er ikke en investering værd.",
       "@{name} {tokens} tokens. Fint. Gør det dobbelt i morgen.",
