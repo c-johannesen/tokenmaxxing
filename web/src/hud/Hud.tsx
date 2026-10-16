@@ -277,7 +277,7 @@ function FirstVisit() {
   return null;
 }
 
-const NOTICE_ICONS = { company: "🏢", trades: "🔁", shop: "🪙" } as const;
+const NOTICE_ICONS = { company: "🏢", trades: "🔁", bag: "🎒" } as const;
 
 /** A line for me from the server (a company application, a trade); a click opens what it's about. */
 function NoticeToast() {

@@ -185,7 +185,7 @@ export interface PlayerInfo {
 /** A line from `town` for one player (`notice`), and the panel a click on it opens. */
 export interface Notice {
   text: string;
-  open?: "company" | "trades" | "shop";
+  open?: "company" | "trades" | "bag";
 }
 
 /** Where someone is: `[id, x, y, facing, state]`. */

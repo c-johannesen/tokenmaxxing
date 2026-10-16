@@ -234,7 +234,6 @@ Together, 4 / 5.
 - A trade takes a worn kind off the giver's look only when their last one goes.
 - The Shop wears only the first one you buy, and shows Wear / Take off next to the price for kinds you hold.
 - The office editor's pills read `Sofa ×2` (what's left in the bag after what's laid out), not "×2 in bag".
-- `deleteUser` deletes the account's rows by `owner_id`; live drops are PR 2's.
 - The admin page's Items column counts `items`, not purchases.
 - Old `ledger` rows of kind `trade` and `furniture` stay, and `deleteUser` still ignores them.
 - The backfill logs `[town] N items into the bag` the one time it runs.
@@ -243,10 +242,7 @@ Together, 4 / 5.
 
 ## As built, PR 2 (world and client)
 
-The world and client half of drops. Not wired yet: `take` doesn't call `town.pickUp` (a comment marks
-where it goes), and nothing calls `placeDrop` from the town (`town.drop`, the per-person cap and the
-sweeper are the next step, as is returning the drops of a deleted user, a closed company's building or
-a deleted owner's office through `removeDrops`).
+The world and client half of drops.
 
 - `Drop`, `DROPS`, `setDrops`, `pieceOfDrop`, `dropName` and `dropCovers` are in `core/src/world.ts`, next
   to `mapOf`. `mapOf` keeps each room's overlay until `setDrops` runs or the room's own map changes
@@ -261,7 +257,21 @@ a deleted owner's office through `removeDrops`).
 - `take` returns `null` when there's nothing to take, `{ notice: "That's ada's floor." }` on someone
   else's office floor, and `{ notice: "🎒 Took the Sofa.", drop }` otherwise: "the", since "a Shades"
   reads wrong. On a drop and facing a blocking one, the one you're on wins.
-- The world tests for drops call the actions in-process (`world.config.actions`, as `match.test.ts`
-  does) with made-up item ids: the internal key never leaves the test server. They move to `town.drop`
-  once it exists.
 - Right-clicking a seat you're next to walks into it the usual way (sits, E on arrival) and then takes.
+
+## As built, PR 2 (wiring)
+
+- `town.drop` answers `{ notice, drop? }`: "Dropped the Duck.", or the world's "There's no room on the floor
+  here." with the row back in the bag at once. A sixth live drop is `too_many`. A worn one comes off only
+  once the world has it, so a full room leaves your look alone.
+- The sweeper is `c.cron.every` (`sweep`, set once in `onWake`), not `c.schedule` or a `run` loop like
+  `arcade`'s: a named job outlives restarts without stacking, and wakes a sleeping town. It takes drops off
+  the world first, then gives the rows back, so a `world` that's down changes nothing until the next sweep.
+- `removeCompany` and `removePlayer` return the drop ids they lifted, and `town` gives those back
+  (`giveBack`, which deletes a row whose dropper is gone). A deleted account's own drops are deleted in
+  `deleteUser` and lifted by `removePlayer`.
+- `take` lifts the drop, then calls `town.pickUp`: false (swept meanwhile) answers `null`; a failed call
+  puts it back down with "That didn't work. Try again." Lifting stands up anyone sitting on it.
+- The trade-accepted toast opens the Bag (`Notice.open` is `"bag"`; nothing opened the Shop any more).
+- The drop tests run on the real path, in company houses (closing them at the end gives their floors
+  back); the sweeper's SQL is tested in memory, since the alarm can't be driven from a test.

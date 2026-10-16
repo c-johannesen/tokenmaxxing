@@ -3,7 +3,7 @@ import type { Client } from "rivetkit/client";
 import type { registry } from "../actors/registry.ts";
 import { main, type Sql } from "../actors/shared.ts";
 import { brandFor } from "../brand.ts";
-import { officeOf } from "./coins.ts";
+import { giveBack, officeOf } from "./coins.ts";
 import { type Changed, companyInfos } from "./companies.ts";
 import { playerCores } from "./users.ts";
 
@@ -23,7 +23,8 @@ export async function push(sql: Sql, client: Client<typeof registry>, changed: C
   for (const id of companies) {
     const info = infos.find((i) => i.id === id);
     if (info) await world.setCompany(info);
-    else await world.removeCompany(id);
+    // Closed: what was dropped in its building goes back to whoever dropped it.
+    else await giveBack(sql, await world.removeCompany(id));
   }
   await pushPlayers(sql, client, [...new Set(changed.users)]);
 }
