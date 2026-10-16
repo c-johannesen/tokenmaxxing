@@ -15,7 +15,7 @@ import { camera, zoom } from "./camera.ts";
 import { gameHits } from "./games.ts";
 import { buildingAt, companyOnPlot, peekHits } from "./houses.ts";
 import { chipHits, signHits } from "./labels.ts";
-import { avatarAt, beginStep, self, stepping, world } from "./world.ts";
+import { avatarAt, beginStep, dropAt, self, stepping, world } from "./world.ts";
 
 const KEYS: Record<string, Facing> = {
   ArrowUp: "up",
@@ -33,9 +33,10 @@ const held: Facing[] = [];
 let running = false;
 /** A key pressed and released between two frames still takes its step. */
 let tapped: Facing | null = null;
-/** Click-to-walk: the remaining steps, and whether to interact on arrival. */
+/** Click-to-walk: the remaining steps, and whether to interact, or take what's there, on arrival. */
 let path: Facing[] = [];
 let interactOnArrival = false;
+let takeOnArrival = false;
 
 const typing = (e: Event) => e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
 
@@ -62,6 +63,7 @@ export function bindInput(canvas: HTMLCanvasElement): void {
       if (!held.includes(dir)) held.push(dir);
       tapped = dir;
       path = [];
+      takeOnArrival = false;
       return;
     }
     switch (e.key.toLowerCase()) {
@@ -76,6 +78,9 @@ export function bindInput(canvas: HTMLCanvasElement): void {
       case "e":
         if (s.dialog) hud.set({ dialog: null });
         else interact();
+        return;
+      case "g":
+        send(conn.take());
         return;
       case "enter":
         e.preventDefault();
@@ -145,11 +150,27 @@ export function bindInput(canvas: HTMLCanvasElement): void {
     if (company) return void hud.set({ panel: { kind: "companyCard", companyId: company.id } });
     walkTo(x, y);
   });
+  // Right-click a drop (or yourself, on one): take it, walking there first (onto it, into its seat, or
+  // up to it). Never the browser's menu.
+  canvas.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (hud.get().panel) return;
+    const x = Math.floor(((e.clientX * camera.dpr) / camera.scale + camera.x) / TILE);
+    const y = Math.floor(((e.clientY * camera.dpr) / camera.scale + camera.y) / TILE);
+    const me = self();
+    if (!me || !dropAt(x, y)) return;
+    if (x === me.x && y === me.y) return void send(conn.take());
+    walkTo(x, y);
+    // A seat is sat on first; anything else is only taken.
+    interactOnArrival &&= world.map.kind(x, y).seat !== undefined;
+    takeOnArrival = path.length > 0;
+  });
 }
 
 /** Click-to-walk (the world or the minimap): route there, and interact if it's a thing, not floor. */
 export function walkTo(x: number, y: number): void {
   const me = self();
+  takeOnArrival = false;
   if (!me || (x === me.x && y === me.y)) return;
   path = route(world.map, [me.x, me.y], [x, y]) ?? [];
   interactOnArrival = path.length > 0 && !world.map.walkable(x, y) && !world.map.kind(x, y).portal;
@@ -196,6 +217,10 @@ export function updateSelf(now: number): void {
     if (interactOnArrival) {
       interactOnArrival = false;
       interact();
+    }
+    if (takeOnArrival) {
+      takeOnArrival = false;
+      send(conn.take());
     }
     return;
   }

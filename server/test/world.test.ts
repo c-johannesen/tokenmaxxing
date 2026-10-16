@@ -5,13 +5,20 @@ import { hqMap, STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
 import {
   type ChatLine,
   cupsLeft,
+  type Drop,
+  defaultLook,
   type Moves,
+  mapOf,
   outsideDoor,
   type PlayerInfo,
+  type RoomId,
   roomEntry,
   route,
   type Snapshot,
+  setDrops,
 } from "@tokenmaxxing/core/world.ts";
+import { world } from "../src/actors/world.ts";
+import { memorySql } from "./memory-sql.ts";
 import { admin, admit, as, event, eventually, signUp, veteran } from "./rivet.ts";
 
 async function connect(token: string) {
@@ -274,5 +281,137 @@ describe("world", () => {
     const again = await connect(guest.token);
     expect(again.snap).toMatchObject({ room, furniture: [...STARTER_OFFICE] });
     for (const c of [g, again]) await c.conn.dispose();
+  });
+});
+
+// MARK: Drops
+
+const actions = world.config.actions!;
+type Ctx = Parameters<typeof actions.take>[0];
+
+/**
+ * The world's actions in this process, players `ids` standing at (3, 4) in `room`: nothing calls
+ * `placeDrop` from `town` yet, and the internal key never leaves the test server.
+ */
+function floor(room: RoomId, ...ids: number[]) {
+  const { db, sql } = memorySql();
+  db.run(
+    "CREATE TABLE chat (id INTEGER PRIMARY KEY, room TEXT, user_id INTEGER, name TEXT, text TEXT, at INTEGER)",
+  );
+  setDrops(room, []);
+  const state: Ctx["state"] = { seeded: true, players: {}, companies: {} };
+  for (const id of ids)
+    state.players[id] = {
+      id,
+      name: `p${id}`,
+      look: defaultLook(id),
+      level: 0,
+      companyId: null,
+      todayTokens: 0,
+      room,
+      x: 3,
+      y: 4,
+      facing: "down",
+      state: "idle",
+      lastInputAt: 0,
+      lastAgentAt: 0,
+      liveAgents: 0,
+    };
+  const sent: { to: number; event: string; payload: unknown }[] = [];
+  const conns = new Map(
+    ids.map((id) => [
+      String(id),
+      {
+        state: { kind: "user", userId: id, via: "session", joined: true },
+        send: (event: string, payload: unknown) => sent.push({ to: id, event, payload }),
+      },
+    ]),
+  );
+  const vars = (world.config as unknown as { createVars: () => Ctx["vars"] }).createVars();
+  const ctx = (conn: unknown) =>
+    ({ state, vars, conns, conn, db: sql, broadcast: () => {} }) as unknown as Ctx;
+  const internal = ctx({ state: { kind: "internal" } });
+  const user = (id: number) => ctx(conns.get(String(id)));
+  return {
+    sent: (event: string) => sent.filter((e) => e.event === event),
+    me: (id: number) => state.players[id]!,
+    put: (id: number, x: number, y: number, facing: "up" | "down" | "left" | "right" = "down") =>
+      Object.assign(state.players[id]!, { x, y, facing, state: "idle" }),
+    drop: (id: number, item: string, by: number) => actions.placeDrop(internal, { id, item, by }) as Drop,
+    removeDrops: (dropIds: number[]) => actions.removeDrops(internal, dropIds),
+    take: (id: number) => actions.take(user(id)),
+    sit: (id: number, facing: string) => actions.sit(user(id), facing),
+    step: (id: number, dir: string) => actions.step(user(id), dir),
+    join: (id: number) => actions.join(user(id)),
+  };
+}
+
+describe("drops", () => {
+  test("a parcel lies where it's dropped; only someone on it takes it, once, and it's gone for everyone", async () => {
+    const f = floor("inn", 1, 2);
+    const duck = f.drop(10, "pet.1", 1);
+    expect(duck).toMatchObject({ id: 10, item: "pet.1", room: "inn", x: 3, y: 4, by: 1 });
+    expect((await f.join(1)).drops).toEqual([duck]);
+    expect(f.sent("drop").map((e) => e.to)).toEqual([1, 2]);
+    f.put(2, 4, 4, "left");
+    expect(f.take(2)).toBeNull(); // next to it
+    f.step(2, "left");
+    expect(f.take(2)).toEqual({ notice: "🎒 Took the Duck.", drop: duck });
+    expect(f.sent("pickup")).toEqual([1, 2].map((to) => ({ to, event: "pickup", payload: { id: 10 } })));
+    expect((await f.join(1)).drops).toEqual([]);
+    expect(f.take(2)).toBeNull(); // already gone
+  });
+
+  test("one drop per tile, the next lands beside it; a room holds 30", () => {
+    const f = floor("inn", 1);
+    const drops = Array.from({ length: 30 }, (_, i) => f.drop(100 + i, "hat.1", 1));
+    expect(drops[0]).toMatchObject({ x: 3, y: 4 });
+    expect(Math.max(Math.abs(drops[1]!.x - 3), Math.abs(drops[1]!.y - 4))).toBe(1);
+    expect(new Set(drops.map((d) => `${d.x},${d.y}`)).size).toBe(30);
+    expect(f.drop(130, "hat.1", 1)).toEqual({ notice: "There's no room on the floor here." } as never);
+  });
+
+  test("a dropped sofa is a sofa: sat on, taken while seated, and the sitter is up after", () => {
+    const f = floor("inn", 1, 2);
+    const sofa = f.drop(30, "furn.s", 1);
+    expect(mapOf("inn").at(sofa.x, sofa.y)).toBe("s");
+    f.put(2, sofa.x + 1, sofa.y, "left");
+    expect(f.take(2)).toBeNull(); // a seat is taken from on it
+    expect(f.sit(2, "left")).toMatchObject({ x: sofa.x, y: sofa.y, state: "sit" });
+    expect(f.take(2)).toEqual({ notice: "🎒 Took the Sofa.", drop: sofa });
+    expect(f.me(2)).toMatchObject({ x: sofa.x, y: sofa.y, state: "idle" });
+    expect(mapOf("inn").at(sofa.x, sofa.y)).toBe("_");
+    // Gone back to its dropper while someone sits on it: they're up too.
+    const again = f.drop(31, "furn.s", 1);
+    f.put(2, again.x + 1, again.y, "left");
+    f.sit(2, "left");
+    f.removeDrops([31]);
+    expect(f.me(2)).toMatchObject({ x: again.x, y: again.y, state: "idle" });
+    expect(f.sent("pickup").map((e) => e.payload)).toEqual([{ id: 30 }, { id: 30 }, { id: 31 }, { id: 31 }]);
+  });
+
+  test("a dropped desk blocks; it's taken from the next tile, facing it, not from further or off a parcel", () => {
+    const f = floor("inn", 1, 2);
+    const desk = f.drop(40, "furn.d", 1);
+    f.put(2, desk.x + 1, desk.y, "left");
+    f.step(2, "left");
+    expect(f.me(2)).toMatchObject({ x: desk.x + 1, y: desk.y });
+    f.put(2, desk.x + 2, desk.y, "left");
+    expect(f.take(2)).toBeNull();
+    // Standing on a parcel, facing the desk: the parcel is what's taken.
+    f.put(1, desk.x + 1, desk.y);
+    const hat = f.drop(41, "hat.1", 1);
+    f.put(2, desk.x + 1, desk.y, "left");
+    expect(f.take(2)).toMatchObject({ drop: hat });
+    expect(f.take(2)).toEqual({ notice: "🎒 Took the Desk.", drop: desk });
+    expect(mapOf("inn").walkable(desk.x, desk.y)).toBe(true);
+  });
+
+  test("an office floor is its owner's: a visitor's gift is theirs to take", () => {
+    const f = floor("office:1", 1, 2);
+    const cat = f.drop(50, "pet.2", 2);
+    expect(f.take(2)).toEqual({ notice: "That's p1's floor." });
+    f.put(1, cat.x, cat.y);
+    expect(f.take(1)).toMatchObject({ drop: cat });
   });
 });
