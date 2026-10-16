@@ -57,7 +57,8 @@ export function Minimap() {
     const draw = () => {
       const g = ref.current?.getContext("2d");
       if (!g) return;
-      g.drawImage(base(map, scale), 0, 0);
+      // As it is now: a drop or a take makes the room a new map.
+      g.drawImage(base(mapOf(room), scale), 0, 0);
       for (const b of buildings(map)) {
         const company = b.plot === null ? null : companyOnPlot(b.plot);
         g.fillStyle = b.plot === null ? C.leaf : company?.id === myCompany ? C.flowerYellow : C.roofRed;
@@ -77,7 +78,7 @@ export function Minimap() {
     draw();
     const id = setInterval(draw, 200);
     return () => clearInterval(id);
-  }, [map, scale, myCompany]);
+  }, [room, map, scale, myCompany]);
 
   return (
     <section className="panel minimap" aria-label="Map">

@@ -5,7 +5,7 @@ import type { GameId } from "@tokenmaxxing/core/games/types.ts";
 import type { Lobby, MatchInfo, TableView } from "@tokenmaxxing/core/games/wire.ts";
 import { namesIn } from "@tokenmaxxing/core/world.ts";
 import { useEffect, useState } from "react";
-import { arcade, openMatch, town } from "../net.ts";
+import { arcade, openMatch } from "../net.ts";
 import { hud, useHud } from "../store.ts";
 import { Chat } from "./Chat.tsx";
 import { MentionInput } from "./MentionInput.tsx";
@@ -279,7 +279,7 @@ function YourTable({ table }: { table: TableView }) {
 }
 
 /** Opening a table: the game, seats, stake, split, open or invite only, and who to invite. */
-export function NewTable({ invite }: { invite?: number }) {
+export function NewTable({ invite, inviteName }: { invite?: number; inviteName?: string }) {
   const wallet = useHud((s) => s.wallet);
   const [game, setGame] = useState<GameId>("spr");
   const def = GAMES[game]!;
@@ -289,14 +289,10 @@ export function NewTable({ invite }: { invite?: number }) {
   const [open, setOpen] = useState(invite === undefined);
   const [names, setNames] = useState("");
   const [minutes, setMinutes] = useState(60);
-  const [inviteName, setInviteName] = useState<string | null>(null);
   const { error, run } = useRun();
   useEffect(() => {
     setSeats(invite !== undefined ? def.players.min : def.players.max);
   }, [def, invite]);
-  useEffect(() => {
-    if (invite !== undefined) void town.profile(invite, "today").then((p) => setInviteName(p.name));
-  }, [invite]);
   const cap = Math.min(MAX_STAKE, Math.floor((wallet?.balance ?? 0) / 2));
   const stake = Math.min(wanted, cap);
 

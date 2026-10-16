@@ -9,7 +9,7 @@ import {
   TILE,
   WALK_STEP_MS,
 } from "@tokenmaxxing/core/world.ts";
-import { conn, town } from "../net.ts";
+import { conn } from "../net.ts";
 import { chatBeside, hud } from "../store.ts";
 import { camera, zoom } from "./camera.ts";
 import { gameHits } from "./games.ts";
@@ -63,6 +63,7 @@ export function bindInput(canvas: HTMLCanvasElement): void {
       if (!held.includes(dir)) held.push(dir);
       tapped = dir;
       path = [];
+      interactOnArrival = false;
       takeOnArrival = false;
       return;
     }
@@ -245,11 +246,11 @@ export function updateSelf(now: number): void {
   send(conn.step(dir));
 }
 
-/** G, or a right-click: take what's there. It goes in the bag, so the wallet's count moves. */
+/** G, or a right-click: take what's there. It goes in the bag, so 🎒 counts one more. */
 function take(): void {
   send(
     conn.take().then((r) => {
-      if (r?.drop) void town.wallet().then((wallet) => hud.set({ wallet }));
+      if (r?.drop) hud.set((s) => ({ wallet: s.wallet && { ...s.wallet, items: s.wallet.items + 1 } }));
       return r;
     }),
   );
