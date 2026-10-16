@@ -41,6 +41,17 @@ export function Shop() {
         <strong>🪙 {wallet.balance.toLocaleString()}</strong> coins
         <span className="muted"> · +{wallet.today} from today so far</span>
       </p>
+      <h3>📜 Today's quests</h3>
+      <ul className="members">
+        {wallet.quests.map((q) => (
+          <li key={q.id} className={q.done ? undefined : "muted"}>
+            <span>
+              {q.done ? "✓" : "○"} {q.text}
+            </span>
+            <span>🪙 {q.coins}</span>
+          </li>
+        ))}
+      </ul>
       <p className="muted small">
         Every day you earn √(tokens ÷ 1M) coins: 100M tokens is 10, 1B is 31. Finish a day 1st, 2nd or 3rd for{" "}
         {PODIUM_COINS.join(", ")} more.

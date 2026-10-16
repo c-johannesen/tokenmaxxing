@@ -227,8 +227,8 @@ describe("leaderboard", () => {
 describe("coins and the shop", () => {
   test("usage earns coins, square-rooted per day", async () => {
     const a = await signUp("coin");
-    // 100M today: √100 = 10. 400M more the same day makes it √500 = 22, not 30. (A minute counts
-    // for at most 200M, so the 400M comes over the next two.)
+    // 100M today: √100 = 10. 400M more the same day makes it √500 = 22, not 30, plus 5 for the
+    // 500M quest. (A minute counts for at most 200M, so the 400M comes over the next two.)
     const now = Date.now();
     await as(a.token)
       .player(a.userId)
@@ -240,12 +240,12 @@ describe("coins and the shop", () => {
         event({ inputTokens: 200e6, timestamp: now + 60_000 }),
         event({ inputTokens: 200e6, timestamp: now + 120_000 }),
       ]);
-    expect((await a.town.wallet()).balance).toBe(22);
+    expect((await a.town.wallet()).balance).toBe(27);
     // Logs from before signing up (a first sync's backfill) pay nothing.
     await as(a.token)
       .player(a.userId)
       .ingest([event({ inputTokens: 150e6, timestamp: Date.UTC(2023, 5, 14, 12) })]);
-    expect((await a.town.wallet()).balance).toBe(22);
+    expect((await a.town.wallet()).balance).toBe(27);
   });
 
   test("buy, then wear; not before, not twice, not when short", async () => {

@@ -1,4 +1,5 @@
 import { levelFor } from "@tokenmaxxing/core/format.ts";
+import { type DayFacts, EMPTY_DAY, QUESTS, questCoins } from "@tokenmaxxing/core/quests.ts";
 import { addDays, dayKey } from "@tokenmaxxing/core/range.ts";
 import { coinsForTokens, type Item, levelItems, PODIUM_COINS } from "@tokenmaxxing/core/shop.ts";
 import { UserError } from "rivetkit";
@@ -13,6 +14,8 @@ export interface Wallet {
   wins: { day: string; place: number; coins: number }[];
   /** Shop item ids: bought, and earned by level. */
   owned: string[];
+  /** Today's quests, and which are done so far. */
+  quests: { id: string; text: string; coins: number; done: boolean }[];
 }
 
 export const ownedItems = async (sql: Sql, userId: number): Promise<string[]> =>
@@ -36,13 +39,24 @@ export async function wallet(sql: Sql, userId: number, now: number): Promise<Wal
     "SELECT created_at AS createdAt FROM users WHERE id = ?",
     userId,
   );
+  const from = me ? dayKey(me.createdAt) : today;
   const days = await all<{ day: string; tokens: number }>(
     sql,
     `SELECT day, SUM(${TOKENS}) AS tokens
      FROM usage_daily WHERE user_id = ? AND day >= ? GROUP BY day`,
     userId,
-    me ? dayKey(me.createdAt) : today,
+    from,
   );
+  // ponytail: one more query per call for the quests, like the rest of the wallet.
+  const activity = await all<{ day: string } & Omit<DayFacts, "tokens">>(
+    sql,
+    `SELECT day, peak_agents AS peakAgents, active_buckets AS activeBuckets, prs
+     FROM activity_daily WHERE user_id = ? AND day >= ?`,
+    userId,
+    from,
+  );
+  const facts = new Map<string, DayFacts>(days.map((d) => [d.day, { ...EMPTY_DAY, tokens: d.tokens }]));
+  for (const { day, ...a } of activity) facts.set(day, { ...EMPTY_DAY, ...facts.get(day), ...a });
   const places = await podiumDays(sql, userId, now);
   const [{ spent }] = (await all<{ spent: number | null }>(
     sql,
@@ -51,14 +65,18 @@ export async function wallet(sql: Sql, userId: number, now: number): Promise<Wal
   )) as [{ spent: number | null }];
   const wins = places.map((p) => ({ ...p, coins: PODIUM_COINS[p.place - 1]! }));
   const earned =
-    days.reduce((n, d) => n + coinsForTokens(d.tokens), 0) + wins.reduce((n, w) => n + w.coins, 0);
+    days.reduce((n, d) => n + coinsForTokens(d.tokens), 0) +
+    wins.reduce((n, w) => n + w.coins, 0) +
+    [...facts.values()].reduce((n, f) => n + questCoins(f), 0);
   const since = addDays(today, -29);
   const lifetime = (await tokensIn(sql, [userId])).get(userId) ?? 0;
+  const todays = facts.get(today) ?? EMPTY_DAY;
   return {
     balance: earned - (spent ?? 0) + (await ledgerSum(sql, userId)),
     today: coinsForTokens(days.find((d) => d.day === today)?.tokens ?? 0),
     wins: wins.filter((w) => w.day >= since),
     owned: [...(await ownedItems(sql, userId)), ...levelItems(levelFor(lifetime)).map((i) => i.id)],
+    quests: QUESTS.map(({ done, ...q }) => ({ ...q, done: done(todays) })),
   };
 }
 
@@ -86,7 +104,7 @@ export async function podiumDays(
 
 /**
  * Every user's balance, for the admin page: `wallet`'s sums over everyone at once.
- * ponytail: all of `usage_daily` per call, like the leaderboards.
+ * ponytail: all of `usage_daily` and `activity_daily` per call, like the leaderboards.
  */
 export async function balances(sql: Sql, now: number): Promise<Map<number, number>> {
   const today = dayKey(now);
@@ -97,14 +115,28 @@ export async function balances(sql: Sql, now: number): Promise<Map<number, numbe
     const had = out.get(userId);
     if (had !== undefined) out.set(userId, had + n);
   };
-  const days = await all<{ userId: number; tokens: number }>(
+  const days = await all<{ userId: number; day: string; tokens: number }>(
     sql,
-    `SELECT user_id AS userId, SUM(${TOKENS}) AS tokens
+    `SELECT user_id AS userId, day, SUM(${TOKENS}) AS tokens
      FROM usage_daily JOIN json_each(?) s ON user_id = CAST(s.key AS INTEGER) AND day >= s.value
      GROUP BY user_id, day`,
     firstDay,
   );
   for (const d of days) add(d.userId, coinsForTokens(d.tokens));
+  const activity = await all<{ userId: number; day: string } & Omit<DayFacts, "tokens">>(
+    sql,
+    `SELECT user_id AS userId, day, peak_agents AS peakAgents, active_buckets AS activeBuckets, prs
+     FROM activity_daily JOIN json_each(?) s ON user_id = CAST(s.key AS INTEGER) AND day >= s.value`,
+    firstDay,
+  );
+  const facts = new Map<string, DayFacts & { userId: number }>(
+    days.map((d) => [`${d.userId} ${d.day}`, { ...EMPTY_DAY, userId: d.userId, tokens: d.tokens }]),
+  );
+  for (const a of activity) {
+    const key = `${a.userId} ${a.day}`;
+    facts.set(key, { ...EMPTY_DAY, ...facts.get(key), ...a });
+  }
+  for (const f of facts.values()) add(f.userId, questCoins(f));
   const places = await all<{ userId: number; place: number }>(
     sql,
     `SELECT user_id AS userId, place FROM (
