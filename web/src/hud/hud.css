@@ -202,6 +202,17 @@ input:focus {
   color: var(--good);
 }
 
+/* The player card's badges: a wrapping row of `.badge` chips (the -6px undoes the first one's margin). */
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  margin: 4px 0 4px -6px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
 .banner {
   position: absolute;
   top: 70px;

@@ -1,7 +1,7 @@
 import { addDays, dayKey } from "@tokenmaxxing/core/range.ts";
 import { coinsForTokens, type Item, PODIUM_COINS } from "@tokenmaxxing/core/shop.ts";
 import { UserError } from "rivetkit";
-import { all, type Sql } from "../actors/shared.ts";
+import { all, one, type Sql } from "../actors/shared.ts";
 import { TOKENS } from "./users.ts";
 
 export interface Wallet {
@@ -30,28 +30,19 @@ export const ownedItems = async (sql: Sql, userId: number): Promise<string[]> =>
  */
 export async function wallet(sql: Sql, userId: number, now: number): Promise<Wallet> {
   const today = dayKey(now);
-  // ponytail: reads every user per call; store a signup day column if the town gets big.
-  const signups = await all<{ id: number; created_at: number }>(sql, "SELECT id, created_at FROM users");
-  const firstDay = new Map(signups.map((u) => [u.id, dayKey(u.created_at)]));
+  const me = await one<{ createdAt: number }>(
+    sql,
+    "SELECT created_at AS createdAt FROM users WHERE id = ?",
+    userId,
+  );
   const days = await all<{ day: string; tokens: number }>(
     sql,
     `SELECT day, SUM(${TOKENS}) AS tokens
      FROM usage_daily WHERE user_id = ? AND day >= ? GROUP BY day`,
     userId,
-    firstDay.get(userId) ?? today,
+    me ? dayKey(me.createdAt) : today,
   );
-  const places = await all<{ day: string; place: number }>(
-    sql,
-    `SELECT day, place FROM (
-       SELECT user_id, day, ROW_NUMBER() OVER (PARTITION BY day ORDER BY SUM(${TOKENS}) DESC, user_id) AS place
-       FROM usage_daily JOIN json_each(?) s ON user_id = CAST(s.key AS INTEGER) AND day >= s.value
-       WHERE day < ? GROUP BY user_id, day)
-     WHERE user_id = ? AND place <= ? ORDER BY day DESC`,
-    JSON.stringify(Object.fromEntries(firstDay)),
-    today,
-    userId,
-    PODIUM_COINS.length,
-  );
+  const places = await podiumDays(sql, userId, now);
   const [{ spent }] = (await all<{ spent: number | null }>(
     sql,
     "SELECT SUM(price) AS spent FROM purchases WHERE user_id = ?",
@@ -67,6 +58,28 @@ export async function wallet(sql: Sql, userId: number, now: number): Promise<Wal
     wins: wins.filter((w) => w.day >= since),
     owned: await ownedItems(sql, userId),
   };
+}
+
+/** Days `userId` finished in the top 3, newest first. Only finished days from each player's sign-up day count. */
+export async function podiumDays(
+  sql: Sql,
+  userId: number,
+  now: number,
+): Promise<{ day: string; place: number }[]> {
+  // ponytail: reads every user per call; store a signup day column if the town gets big.
+  const signups = await all<{ id: number; created_at: number }>(sql, "SELECT id, created_at FROM users");
+  return all(
+    sql,
+    `SELECT day, place FROM (
+       SELECT user_id, day, ROW_NUMBER() OVER (PARTITION BY day ORDER BY SUM(${TOKENS}) DESC, user_id) AS place
+       FROM usage_daily JOIN json_each(?) s ON user_id = CAST(s.key AS INTEGER) AND day >= s.value
+       WHERE day < ? GROUP BY user_id, day)
+     WHERE user_id = ? AND place <= ? ORDER BY day DESC`,
+    JSON.stringify(Object.fromEntries(signups.map((u) => [u.id, dayKey(u.created_at)]))),
+    dayKey(now),
+    userId,
+    PODIUM_COINS.length,
+  );
 }
 
 /**
