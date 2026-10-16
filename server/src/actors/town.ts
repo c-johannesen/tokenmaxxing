@@ -1,6 +1,13 @@
 import { frontier } from "@tokenmaxxing/core/maps.ts";
 import { isRangeKey } from "@tokenmaxxing/core/range.ts";
-import { itemById, itemsIn } from "@tokenmaxxing/core/shop.ts";
+import {
+  emptySide,
+  itemById,
+  itemsIn,
+  parseSide,
+  TRADE_COINS_CAP,
+  TRADE_ITEMS_CAP,
+} from "@tokenmaxxing/core/shop.ts";
 import { type CompanyInfo, defaultLook, type Look, parseLook } from "@tokenmaxxing/core/world.ts";
 import { actor, UserError } from "rivetkit";
 import { db } from "rivetkit/db";
@@ -33,6 +40,7 @@ import {
 } from "../town/boards.ts";
 import {
   buy,
+  checkTrade,
   type Entry,
   type HoldKind,
   heldIn,
@@ -41,6 +49,9 @@ import {
   pay,
   refund,
   setBalance,
+  settleTrade,
+  type Trade,
+  tradesWhere,
   type Wallet,
   wallet,
 } from "../town/coins.ts";
@@ -95,7 +106,7 @@ export type {
   Profile,
   Today,
 } from "../town/boards.ts";
-export type { Wallet } from "../town/coins.ts";
+export type { Trade, Wallet } from "../town/coins.ts";
 export type { Listing, MyCompany } from "../town/companies.ts";
 export type { GamePlayer, GameStats } from "../town/games.ts";
 export type { PlayerCore } from "../town/users.ts";
@@ -130,7 +141,11 @@ const SIGNUPS_PER_HOUR = 1000;
 const BRANDINGS_PER_HOUR = 5;
 /** Each one pings the company's owner. */
 const APPLICATIONS_PER_HOUR = 10;
+/** Each one pings the other person. */
+const TRADES_PER_HOUR = 10;
 const HOUR = 3_600_000;
+/** Offers older than this are gone. */
+const TRADE_TTL = 7 * 24 * HOUR;
 
 /** Many rows in few statements (a first sync can report years of days). */
 async function insertRows(sql: Sql, insert: string, rows: unknown[][]): Promise<void> {
@@ -163,6 +178,7 @@ export const town = actor({
     signupsPerIp: new RateLimiter(SIGNUPS_PER_IP_PER_HOUR, HOUR),
     brandings: new RateLimiter(BRANDINGS_PER_HOUR, HOUR),
     applications: new RateLimiter(APPLICATIONS_PER_HOUR, HOUR),
+    trades: new RateLimiter(TRADES_PER_HOUR, HOUR),
     /** Verified tokens, so a burst of calls doesn't ask `player` every time. */
     tokens: new Map() as TokenCache,
   }),
@@ -291,7 +307,10 @@ export const town = actor({
         throw new UserError("That's a lot of applications. Try again in an hour.", { code: "rate_limited" });
       const company = await c.vars.serial(() => apply(c.db, userId, companyId, Date.now()));
       const me = await userById(c.db, userId);
-      await notify(c.client<typeof registry>(), company.ownerId, `${me.name} asks to join ${company.name}.`);
+      await notify(c.client<typeof registry>(), company.ownerId, {
+        text: `${me.name} asks to join ${company.name}.`,
+        open: "company",
+      });
     },
 
     withdraw: async (c): Promise<void> => {
@@ -306,7 +325,10 @@ export const town = actor({
         return { company, changed: await approve(c.db, company, applicantId, Date.now()) };
       });
       await push(c.db, client, changed);
-      await notify(client, changed.users[0]!, `You're in! Welcome to ${company.name}.`);
+      await notify(client, changed.users[0]!, {
+        text: `You're in! Welcome to ${company.name}.`,
+        open: "company",
+      });
       return myCompany(c.db, company.id, userId);
     },
 
@@ -314,7 +336,10 @@ export const town = actor({
       const userId = requireUser(c.conn.state);
       const company = await ownedCompany(c.db, userId);
       const declined = await c.vars.serial(() => decline(c.db, company, applicantId));
-      await notify(c.client<typeof registry>(), declined, `${company.name} said no this time.`);
+      await notify(c.client<typeof registry>(), declined, {
+        text: `${company.name} said no this time.`,
+        open: "company",
+      });
       return myCompany(c.db, company.id, userId);
     },
 
@@ -377,6 +402,81 @@ export const town = actor({
       if (item.level !== undefined)
         throw new UserError("That one is earned, not bought.", { code: "not_for_sale" });
       return c.vars.serial(() => buy(c.db, userId, item, Date.now()));
+    },
+
+    // MARK: Trades
+
+    /** Offers `toId` my `give` for their `want`. It replaces my open offer, if I had one. */
+    offerTrade: async (c, toId: unknown, rawGive: unknown, rawWant: unknown): Promise<void> => {
+      const userId = requireUser(c.conn.state);
+      if (typeof toId !== "number") throw new UserError("Unknown player.", { code: "not_found" });
+      if (toId === userId) throw new UserError("Trade with someone else.", { code: "invalid_trade" });
+      const me = await userById(c.db, userId);
+      const them = await userById(c.db, toId);
+      const give = parseSide(rawGive);
+      const want = parseSide(rawWant);
+      if (!give || !want || (emptySide(give) && emptySide(want)))
+        throw new UserError(
+          `Up to 🪙 ${TRADE_COINS_CAP} and ${TRADE_ITEMS_CAP} shop items a side, and something at all.`,
+          { code: "invalid_trade" },
+        );
+      const now = Date.now();
+      const trade = { fromId: userId, from: me.name, toId, to: them.name, give, want, at: now };
+      // Their coins are theirs to know: accepting checks them.
+      await checkTrade(c.db, { ...trade, want: { ...want, coins: 0 } }, now);
+      if (!c.vars.trades.take(String(userId), now))
+        throw new UserError("That's a lot of offers. Try again in an hour.", { code: "rate_limited" });
+      await c.db.execute(
+        "INSERT OR REPLACE INTO trades (from_id, to_id, give, want, at) VALUES (?, ?, ?, ?, ?)",
+        userId,
+        toId,
+        JSON.stringify(give),
+        JSON.stringify(want),
+        now,
+      );
+      await notify(c.client<typeof registry>(), toId, {
+        text: `${me.name} offers you a trade.`,
+        open: "trades",
+      });
+    },
+
+    /** Offers to me and my own, newest first. */
+    trades: async (c): Promise<{ incoming: Trade[]; outgoing: Trade | null }> => {
+      const userId = requireUser(c.conn.state);
+      await c.db.execute("DELETE FROM trades WHERE at < ?", Date.now() - TRADE_TTL);
+      return {
+        incoming: await tradesWhere(c.db, "to_id = ?", userId),
+        outgoing: (await tradesWhere(c.db, "from_id = ?", userId))[0] ?? null,
+      };
+    },
+
+    /** `at`: the offer as I saw it, so one swapped meanwhile isn't accepted unseen. */
+    acceptTrade: async (c, fromId: unknown, at: unknown): Promise<Wallet> => {
+      const userId = requireUser(c.conn.state);
+      const now = Date.now();
+      const trade = await c.vars.serial(async () => {
+        const trade = await offerTo(c.db, userId, fromId, now);
+        if (trade.at !== at)
+          throw new UserError("They changed the offer. Have another look.", { code: "not_found" });
+        await settleTrade(c.db, trade, now);
+        return trade;
+      });
+      const client = c.client<typeof registry>();
+      // Looks may have changed.
+      await pushPlayers(c.db, client, [trade.fromId, userId]);
+      await notify(client, trade.fromId, { text: `${trade.to} accepted your trade.`, open: "shop" });
+      return wallet(c.db, userId, now);
+    },
+
+    declineTrade: async (c, fromId: unknown): Promise<void> => {
+      const userId = requireUser(c.conn.state);
+      const trade = await offerTo(c.db, userId, fromId, Date.now());
+      await c.db.execute("DELETE FROM trades WHERE from_id = ? AND at = ?", trade.fromId, trade.at);
+      await notify(c.client<typeof registry>(), trade.fromId, { text: `${trade.to} passed on your trade.` });
+    },
+
+    withdrawTrade: async (c): Promise<void> => {
+      await c.db.execute("DELETE FROM trades WHERE from_id = ?", requireUser(c.conn.state));
     },
 
     /** From `player` after an ingest: replaces those days' rollups. */
@@ -645,7 +745,8 @@ export const town = actor({
         Date.now(),
       );
       await push(c.db, client, changed);
-      for (const id of changed.users) await notify(client, id, "Your company was closed by the town admin.");
+      for (const id of changed.users)
+        await notify(client, id, { text: "Your company was closed by the town admin.", open: "company" });
     },
 
     /** For `world` starting from nothing: everyone and every company. */
@@ -698,6 +799,16 @@ async function renameCompany(sql: Sql, client: Client, companyId: number, rawNam
   const name = companyName(rawName);
   await sql.execute("UPDATE companies SET name = ? WHERE id = ?", name, companyId);
   await push(sql, client, { companies: [companyId], users: [] });
+}
+
+/** The open offer `fromId` made me, or `not_found`. */
+async function offerTo(sql: Sql, userId: number, fromId: unknown, now: number): Promise<Trade> {
+  const [trade] =
+    typeof fromId === "number"
+      ? await tradesWhere(sql, "from_id = ? AND to_id = ? AND at >= ?", fromId, userId, now - TRADE_TTL)
+      : [];
+  if (!trade) throw new UserError("That offer is gone.", { code: "not_found" });
+  return trade;
 }
 
 async function namesOf(sql: Sql, userIds: number[]): Promise<Record<number, string>> {

@@ -152,8 +152,8 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 
 **`town["main"]`**: everything cold, joined in SQL.
 - Tables: `users`, `companies` (ids never reused), `usage_daily`, `activity_daily`, `capped_daily`,
-  `purchases`, `ledger` (coins held and paid by games), `match_players` (one row per player per finished
-  game), `deleted_users`, `admin_log`.
+  `purchases`, `ledger` (coins held and paid by games, and traded), `trades` (one open offer per sender),
+  `match_players` (one row per player per finished game), `deleted_users`, `admin_log`.
 - Accounts: `signUp` (20 an hour per IP, 1,000 an hour in all), `rename`, `setLook` (refuses shop items you don't own), `me`.
 - Companies: create (on a plot the owner picks: any empty block next to the town, see `frontier` in
   `core/src/maps.ts`), leave, kick, rename, `setWebsite`. One company per person, at most 50 members. The
@@ -166,11 +166,13 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 - Stats: `leaderboard`, `profile`, `today` (the HUD's corner), `searchNames`, `gameBoard`. Cost is priced
   when read.
 - Coins: `wallet`, `buy`; for `arcade`: `hold`, `pay`, `refund`, `recordMatch`. Games: `gameBoard`.
+- Trades: `offerTrade` (10 an hour; a new offer replaces your old one), `trades`, `acceptTrade`,
+  `declineTrade`, `withdrawTrade`. See *Coins and the shop*.
 - Admin (`town/admin.ts`, for `/admin`): `adminOverview`, `adminUsers` and `adminCompanies`; rename people
   and companies; set a balance (the difference goes in the `ledger` as kind and ref `admin`); take someone
   out of their company; close a company; wipe someone's usage (their `player` drops its raw events too:
   `wipe`); delete an account. Every change goes in `admin_log`, shown on the page's Log tab. Deleting drops their usage, activity,
-  purchases and application, hands over or closes their company, takes them out of `world`
+  purchases, application and trade offers, hands over or closes their company, takes them out of `world`
   (`removePlayer`) and destroys their `player` (`close`), so every token and session stops working. It's
   refused while they have coins in an unsettled game. Their `ledger` and `match_players` rows stay, and
   `deleted_users` keeps new ids above theirs, so nobody inherits them.
@@ -214,6 +216,10 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   worn through `Look` (`outfit` ≥ 8, `glasses`, `hat`, `pet`). Pets follow their owner in the client.
 - Three items are earned, not bought: a top hat, server-rack armour and a Singularity orb, owned from levels 10,
   20 and 30. Like balances, that's worked out from usage (lifetime tokens), so there's nothing to claim.
+- **Trades** (from a player card): up to 🪙 500 and 4 sold items each way, for 7 days. Accepting re-checks
+  both sides under `serial` and moves everything in one transaction (`settleTrade`): coins through the
+  `ledger` (kind `trade`), items by moving the `purchases` row to the receiver at price 0, with a ledger row
+  of minus the price for the giver so their balance stays put. An item that leaves you comes off your look.
 
 ## Games
 

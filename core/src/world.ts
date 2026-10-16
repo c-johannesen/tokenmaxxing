@@ -108,6 +108,12 @@ export interface PlayerInfo {
   dozing: boolean;
 }
 
+/** A line from `town` for one player (`notice`), and the panel a click on it opens. */
+export interface Notice {
+  text: string;
+  open?: "company" | "trades" | "shop";
+}
+
 /** Where someone is: `[id, x, y, facing, state]`. */
 export type PlayerPos = [number, number, number, Facing, PlayerState];
 

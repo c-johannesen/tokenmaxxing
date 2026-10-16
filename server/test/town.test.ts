@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { frontier, plotId } from "@tokenmaxxing/core/maps.ts";
-import { admin, admit, as, client, event, MIN, signUp } from "./rivet.ts";
+import { ITEMS } from "@tokenmaxxing/core/shop.ts";
+import type { Notice } from "@tokenmaxxing/core/world.ts";
+import { admin, admit, as, client, event, eventually, MIN, rich, signUp } from "./rivet.ts";
 
 describe("accounts", () => {
   test("names are unique and validated", async () => {
@@ -284,5 +286,94 @@ describe("coins and the shop", () => {
     await expect(b.town.setLook({ ...(await b.town.me()).look, hat: 4 })).rejects.toMatchObject({
       code: "not_owned",
     });
+  });
+});
+
+describe("trades", () => {
+  const coins = (n: number) => ({ coins: n, items: [] });
+
+  /** The `notice` events for `token`'s tab, which has walked in. */
+  async function notices(token: string) {
+    const conn = as(token).world.connect();
+    const got: Notice[] = [];
+    conn.on("notice", (n: Notice) => got.push(n));
+    await conn.join();
+    return { conn, got };
+  }
+
+  test("not to yourself, not nothing, only sold items; they get a toast that opens their trades", async () => {
+    const ada = await rich("ada");
+    const bo = await rich("bo");
+    await expect(ada.town.offerTrade(ada.userId, coins(10), coins(0))).rejects.toThrow();
+    await expect(ada.town.offerTrade(bo.userId, coins(0), coins(0))).rejects.toMatchObject({
+      code: "invalid_trade",
+    });
+    // A level reward (a free outfit until those land) has no price, so it can't move.
+    const unsold = ITEMS.find((i) => i.price === 0)?.id ?? "outfit.0";
+    await expect(
+      ada.town.offerTrade(bo.userId, { coins: 0, items: [unsold] }, coins(0)),
+    ).rejects.toMatchObject({ code: "invalid_trade" });
+    const { conn, got } = await notices(bo.token);
+    await ada.town.offerTrade(bo.userId, coins(10), coins(0));
+    await eventually(() =>
+      expect(got).toContainEqual({ text: `${ada.name} offers you a trade.`, open: "trades" }),
+    );
+    await conn.dispose();
+  });
+
+  test("accepting moves a worn hat off the giver's head, and coins the other way", async () => {
+    const ada = await rich("ada", 1000);
+    const bo = await rich("bo", 1000);
+    await ada.town.buy("hat.1");
+    await ada.town.setLook({ ...(await ada.town.me()).look, hat: 1 });
+    await ada.town.offerTrade(bo.userId, { coins: 0, items: ["hat.1"] }, coins(50));
+    const offer = (await bo.town.trades()).incoming[0]!;
+    expect(offer).toMatchObject({ from: ada.name, to: bo.name, want: coins(50) });
+    const after = await bo.town.acceptTrade(ada.userId, offer.at);
+    expect(after).toMatchObject({ balance: 950, owned: ["hat.1"] });
+    expect((await ada.town.me()).look.hat).toBe(0);
+    expect(await ada.town.wallet()).toMatchObject({ balance: 900 + 50, owned: [] });
+    expect(await bo.town.trades()).toEqual({ incoming: [], outgoing: null });
+    // The hat's ref stays at minus its price for good; that's not a game in progress.
+    await ada.town.offerTrade(bo.userId, coins(1), coins(0));
+    await admin().adminDeleteUser(ada.userId);
+    expect(await bo.town.trades()).toEqual({ incoming: [], outgoing: null });
+  });
+
+  test("a new offer replaces the old one, and the old one can't be accepted", async () => {
+    const ada = await rich("ada");
+    const bo = await rich("bo");
+    const cy = await rich("cy");
+    await ada.town.offerTrade(bo.userId, coins(50), coins(0));
+    const first = (await bo.town.trades()).incoming[0]!;
+    await Bun.sleep(5);
+    await ada.town.offerTrade(bo.userId, coins(1), coins(0));
+    await expect(bo.town.acceptTrade(ada.userId, first.at)).rejects.toThrow("changed");
+    expect((await bo.town.trades()).incoming.map((t) => t.give)).toEqual([coins(1)]);
+    await ada.town.offerTrade(cy.userId, coins(2), coins(0));
+    expect((await bo.town.trades()).incoming).toEqual([]);
+    expect((await ada.town.trades()).outgoing).toMatchObject({ toId: cy.userId, give: coins(2) });
+    await ada.town.withdrawTrade();
+    expect((await cy.town.trades()).incoming).toEqual([]);
+  });
+
+  test("ten offers an hour", async () => {
+    const ada = await rich("ada");
+    const bo = await signUp("bo");
+    for (let i = 0; i < 10; i++) await ada.town.offerTrade(bo.userId, coins(1), coins(0));
+    await expect(ada.town.offerTrade(bo.userId, coins(1), coins(0))).rejects.toMatchObject({
+      code: "rate_limited",
+    });
+  });
+
+  test("declining tells the sender", async () => {
+    const ada = await rich("ada");
+    const bo = await rich("bo");
+    const { conn, got } = await notices(ada.token);
+    await ada.town.offerTrade(bo.userId, coins(5), coins(0));
+    await bo.town.declineTrade(ada.userId);
+    await eventually(() => expect(got).toContainEqual({ text: `${bo.name} passed on your trade.` }));
+    expect((await ada.town.trades()).outgoing).toBeNull();
+    await conn.dispose();
   });
 });

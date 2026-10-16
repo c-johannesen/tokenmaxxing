@@ -56,5 +56,6 @@ export type {
   MyCompany,
   Profile,
   Today,
+  Trade,
   Wallet,
 } from "./town.ts";

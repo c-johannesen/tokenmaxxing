@@ -1,10 +1,22 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import type { Sql } from "../src/actors/shared.ts";
-import { balances, heldIn, hold, pay, refund, setBalance, wallet } from "../src/town/coins.ts";
+import { itemById } from "@tokenmaxxing/core/shop.ts";
+import type { TxSql } from "../src/actors/shared.ts";
+import {
+  balances,
+  buy,
+  heldIn,
+  hold,
+  pay,
+  refund,
+  setBalance,
+  settleTrade,
+  type Trade,
+  wallet,
+} from "../src/town/coins.ts";
 import { migrate } from "../src/town/schema.ts";
 import { memorySql } from "./memory-sql.ts";
 
-let sql: Sql;
+let sql: TxSql;
 const NOW = Date.UTC(2026, 8, 29, 12);
 const names = { 1: "ada", 2: "bo", 3: "cy" };
 
@@ -189,5 +201,63 @@ describe("the admin page's balances", () => {
     await setBalance(sql, 1, 3, NOW);
     expect(await balance(1)).toBe(3);
     expect((await balances(sql, NOW)).get(1)).toBe(3);
+  });
+});
+
+describe("trades", () => {
+  const specs = itemById("glasses.1")!; // Nerd specs, 60
+  /** ada (130, level 10 with the top hat) offers bo (80), unless told otherwise. */
+  const trade = (t: Partial<Trade>): Trade => ({
+    fromId: 1,
+    from: "ada",
+    toId: 2,
+    to: "bo",
+    give: { coins: 0, items: [] },
+    want: { coins: 0, items: [] },
+    at: NOW,
+    ...t,
+  });
+
+  test("coins both ways net the difference, and the ref sums to 0", async () => {
+    await settleTrade(sql, trade({ give: { coins: 50, items: [] }, want: { coins: 20, items: [] } }), NOW);
+    expect(await balance(1)).toBe(130 - 30);
+    expect(await balance(2)).toBe(80 + 30);
+    expect(await sumOf(`trade:1:${NOW}`)).toBe(0);
+  });
+
+  test("an item moves; the giver's balance stays put, and they can buy it back", async () => {
+    await buy(sql, 1, specs, NOW);
+    expect(await balance(1)).toBe(70);
+    await settleTrade(sql, trade({ give: { coins: 0, items: [specs.id] } }), NOW);
+    expect(await balance(1)).toBe(70);
+    expect(await balance(2)).toBe(80);
+    expect((await wallet(sql, 1, NOW)).owned).toEqual(["hat.4"]);
+    expect((await wallet(sql, 2, NOW)).owned).toEqual([specs.id]);
+    expect(await sumOf(`trade:1:${NOW}`)).toBe(-specs.price);
+    // bo got it at price 0: passing it on to cy takes nothing back, so no ledger row.
+    await settleTrade(
+      sql,
+      trade({ fromId: 2, from: "bo", toId: 3, to: "cy", give: { coins: 0, items: [specs.id] }, at: NOW + 1 }),
+      NOW,
+    );
+    expect(await sumOf(`trade:2:${NOW + 1}`)).toBeNull();
+    expect([await balance(2), await balance(3)]).toEqual([80, 35]);
+    await buy(sql, 1, specs, NOW);
+    expect(await balance(1)).toBe(10);
+  });
+
+  test("the giver's coins dropped since the offer: too_poor, and nothing moves", async () => {
+    const offer = trade({ give: { coins: 100, items: [] } });
+    await buy(sql, 1, specs, NOW); // 130 → 70
+    await expect(settleTrade(sql, offer, NOW)).rejects.toMatchObject({ code: "too_poor" });
+    expect([await balance(1), await balance(2)]).toEqual([70, 80]);
+  });
+
+  test("the receiver bought it meanwhile: owned", async () => {
+    await buy(sql, 1, specs, NOW);
+    const offer = trade({ give: { coins: 0, items: [specs.id] } });
+    await buy(sql, 2, specs, NOW);
+    await expect(settleTrade(sql, offer, NOW)).rejects.toMatchObject({ code: "owned" });
+    expect((await wallet(sql, 1, NOW)).owned).toEqual([specs.id, "hat.4"]);
   });
 });

@@ -190,6 +190,11 @@ export interface Sql {
   execute(sql: string, ...args: unknown[]): Promise<unknown[]>;
 }
 
+/** `Sql` that can also run several statements as one: `c.db`, or `memorySql` in tests. */
+export interface TxSql extends Sql {
+  transaction<T>(fn: (tx: Sql) => Promise<T>): Promise<T>;
+}
+
 export const all = <T>(sql: Sql, query: string, ...args: unknown[]): Promise<T[]> =>
   sql.execute(query, ...args) as Promise<T[]>;
 

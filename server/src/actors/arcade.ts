@@ -688,5 +688,5 @@ function push(c: ArcadeCtx): void {
 /** A toast for one player, through `world` (the tab they have open). */
 const tell = (client: Client<typeof registry>, userId: number, text: string) =>
   main(client)
-    .world.notify(userId, text)
+    .world.notify(userId, { text })
     .catch(() => {});

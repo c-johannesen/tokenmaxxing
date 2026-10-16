@@ -1,10 +1,18 @@
 import { levelFor } from "@tokenmaxxing/core/format.ts";
 import { type DayFacts, EMPTY_DAY, QUESTS, questCoins } from "@tokenmaxxing/core/quests.ts";
 import { addDays, dayKey } from "@tokenmaxxing/core/range.ts";
-import { coinsForTokens, type Item, levelItems, PODIUM_COINS } from "@tokenmaxxing/core/shop.ts";
+import {
+  coinsForTokens,
+  type Item,
+  itemById,
+  itemsIn,
+  levelItems,
+  PODIUM_COINS,
+  type Side,
+} from "@tokenmaxxing/core/shop.ts";
 import { UserError } from "rivetkit";
-import { all, one, type Sql } from "../actors/shared.ts";
-import { TOKENS, tokensIn } from "./users.ts";
+import { all, one, type Sql, type TxSql } from "../actors/shared.ts";
+import { lookOf, TOKENS, tokensIn, userById } from "./users.ts";
 
 export interface Wallet {
   balance: number;
@@ -297,4 +305,105 @@ export async function refund(sql: Sql, ref: string, now: number, userIds?: numbe
     back.map(([userId, amount]) => ({ userId, amount })),
     now,
   );
+}
+
+// MARK: Trades: coins and items between two players
+
+export interface Trade {
+  fromId: number;
+  from: string;
+  toId: number;
+  to: string;
+  give: Side;
+  want: Side;
+  at: number;
+}
+
+/** Both ways a trade goes. */
+const directions = (t: Trade) => [
+  { giverId: t.fromId, giver: t.from, receiverId: t.toId, receiver: t.to, side: t.give },
+  { giverId: t.toId, giver: t.to, receiverId: t.fromId, receiver: t.from, side: t.want },
+];
+
+/** Open offers matching `where` (on `trades`), newest first, with names. */
+export async function tradesWhere(sql: Sql, where: string, ...args: unknown[]): Promise<Trade[]> {
+  const rows = await all<Omit<Trade, "give" | "want"> & { give: string; want: string }>(
+    sql,
+    `SELECT from_id AS fromId, f.name AS "from", to_id AS toId, r.name AS "to", give, want, at
+     FROM trades JOIN users f ON f.id = from_id JOIN users r ON r.id = to_id
+     WHERE ${where} ORDER BY at DESC`,
+    ...args,
+  );
+  return rows.map((r) => ({ ...r, give: JSON.parse(r.give), want: JSON.parse(r.want) }));
+}
+
+/**
+ * Throws unless each side owns what it gives (`not_owned`), has none of what it gets (`owned`),
+ * and has the coins it gives (`too_poor`).
+ */
+export async function checkTrade(sql: Sql, t: Trade, now: number): Promise<void> {
+  for (const d of directions(t)) {
+    const has = await ownedItems(sql, d.giverId);
+    const gets = await ownedItems(sql, d.receiverId);
+    for (const id of d.side.items) {
+      const name = itemById(id)?.name ?? id;
+      if (!has.includes(id)) throw new UserError(`${d.giver} doesn't have ${name}.`, { code: "not_owned" });
+      if (gets.includes(id)) throw new UserError(`${d.receiver} already has ${name}.`, { code: "owned" });
+    }
+    if (d.side.coins === 0) continue;
+    const { balance } = await wallet(sql, d.giverId, now);
+    if (balance < d.side.coins)
+      throw new UserError(`${d.giver} only has 🪙 ${balance}.`, { code: "too_poor" });
+  }
+}
+
+/**
+ * Moves `give` from `from` to `to` and `want` the other way, in one ref, all or nothing, and drops
+ * the offer. Run it serialized. Throws `too_poor` / `not_owned` / `owned` when something changed
+ * since the offer.
+ * ponytail: items live in `purchases` and their value follows them through the ledger. If that ever
+ * reads wrong, the upgrade is an `items (user_id, item)` table for ownership, `purchases` left as spend.
+ */
+export async function settleTrade(sql: TxSql, t: Trade, now: number): Promise<void> {
+  await sql.transaction(async (tx) => {
+    await checkTrade(tx, t, now);
+    // The offer goes with it, so it can't be settled twice.
+    await tx.execute("DELETE FROM trades WHERE from_id = ? AND at = ?", t.fromId, t.at);
+    const ref = `trade:${t.fromId}:${t.at}`;
+    const entry = (userId: number, amount: number) =>
+      tx.execute(
+        "INSERT INTO ledger (user_id, amount, kind, ref, at) VALUES (?, ?, 'trade', ?, ?)",
+        userId,
+        amount,
+        ref,
+        now,
+      );
+    for (const d of directions(t)) {
+      if (d.side.coins > 0) {
+        await entry(d.giverId, -d.side.coins);
+        await entry(d.receiverId, d.side.coins);
+      }
+      if (d.side.items.length === 0) continue;
+      for (const id of d.side.items) {
+        const [bought] = await all<{ price: number }>(
+          tx,
+          "DELETE FROM purchases WHERE user_id = ? AND item = ? RETURNING price",
+          d.giverId,
+          id,
+        );
+        // Without its purchase row the item would be refunded; this keeps the giver's balance put.
+        if (bought!.price > 0) await entry(d.giverId, -bought!.price);
+        await tx.execute(
+          "INSERT INTO purchases (user_id, item, price, at) VALUES (?, ?, 0, ?)",
+          d.receiverId,
+          id,
+          now,
+        );
+      }
+      // Nobody wears what they don't own.
+      const look = lookOf(await userById(tx, d.giverId));
+      for (const i of itemsIn(look)) if (d.side.items.includes(i.id)) look[i.slot] = 0;
+      await tx.execute("UPDATE users SET look = ? WHERE id = ?", JSON.stringify(look), d.giverId);
+    }
+  });
 }

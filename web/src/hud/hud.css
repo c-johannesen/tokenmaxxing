@@ -969,6 +969,17 @@ input:focus {
   gap: 8px;
 }
 
+/* A trade: what you give beside what you get. */
+.trade-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.trade-sides .pills {
+  flex-wrap: wrap;
+}
+
 .listings li {
   justify-content: space-between;
   padding: 6px 8px;
