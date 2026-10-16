@@ -24,6 +24,8 @@ export interface Item {
   index: number;
   name: string;
   price: number;
+  /** Owned from this level on; never sold. */
+  level?: number;
 }
 
 /** Outfits below this are free; the ones after are sold. */
@@ -35,6 +37,10 @@ const item = (slot: Slot, index: number, name: string, price: number): Item => (
   index,
   name,
   price,
+});
+const reward = (slot: Slot, index: number, name: string, level: number): Item => ({
+  ...item(slot, index, name, 0),
+  level,
 });
 
 export const ITEMS: readonly Item[] = [
@@ -53,7 +59,14 @@ export const ITEMS: readonly Item[] = [
   item("pet", 3, "Dog", 400),
   item("pet", 4, "Dragon", 1500),
   item("pet", 5, "Panda", 800),
+  reward("hat", 4, "Top hat", 10),
+  reward("outfit", 12, "Server-rack armour", 20),
+  reward("pet", 6, "Singularity orb", 30),
 ];
+
+/** The level items `level` has earned. */
+export const levelItems = (level: number): Item[] =>
+  ITEMS.filter((i) => i.level !== undefined && i.level <= level);
 
 export const itemById = (id: unknown): Item | undefined => ITEMS.find((i) => i.id === id);
 

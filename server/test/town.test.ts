@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { frontier, plotId } from "@tokenmaxxing/core/maps.ts";
-import { admin, admit, as, client, event, signUp } from "./rivet.ts";
+import { admin, admit, as, client, event, MIN, signUp } from "./rivet.ts";
 
 describe("accounts", () => {
   test("names are unique and validated", async () => {
@@ -244,5 +244,28 @@ describe("coins and the shop", () => {
     await expect(a.town.buy("nope")).rejects.toThrow();
     await a.town.setLook({ ...(await a.town.me()).look, glasses: 1 });
     expect((await a.town.me()).look.glasses).toBe(1);
+  });
+
+  test("level items: worn from level 10, never sold", async () => {
+    const a = await signUp("top");
+    // 10B lifetime: 50 minutes at the 200M a minute that counts.
+    const start = Date.now() - 2 * 60 * MIN;
+    await as(a.token)
+      .player(a.userId)
+      .ingest(
+        Array.from({ length: 50 }, (_, i) =>
+          event({ inputTokens: 200e6, outputTokens: 0, timestamp: start + i * MIN }),
+        ),
+      );
+    expect((await a.town.profile(a.userId, "all")).level).toBe(10);
+    expect((await a.town.wallet()).owned).toContain("hat.4");
+    await a.town.setLook({ ...(await a.town.me()).look, hat: 4 });
+    expect((await a.town.me()).look.hat).toBe(4);
+    await expect(a.town.buy("hat.4")).rejects.toMatchObject({ code: "not_for_sale" });
+
+    const b = await signUp("top");
+    await expect(b.town.setLook({ ...(await b.town.me()).look, hat: 4 })).rejects.toMatchObject({
+      code: "not_owned",
+    });
   });
 });

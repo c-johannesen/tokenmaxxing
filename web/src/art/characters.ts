@@ -321,13 +321,29 @@ const HATS: Record<View, string[]>[] = [
     side: [".....y.yy.y.....", ".....yyyyyy.....", ".....yryyby.....", ".....YYYYYY....."],
     up: [".....y.yy.y.....", ".....yyyyyy.....", ".....yyyyyy.....", ".....YYYYYY....."],
   },
+  // Top hat (level 10): tall, with a red band and a wide brim.
+  {
+    down: ["....oooooooo....", "....okkkkkKo....", "....okkkkkKo....", "....orrrrrro....", "..okkkkkkkkkko.."],
+    side: ["....oooooooo....", "....okkkkkKo....", "....okkkkkKo....", "....orrrrrro....", "..okkkkkkkkkkko."],
+    up: ["....oooooooo....", "....okkkkkko....", "....okkkkkko....", "....orrrrrro....", "..okkkkkkkkkko.."],
+  },
 ];
 const HAT_COLORS: Palette[] = [
   {},
   { o: C.ink, b: "#e0584f", B: "#f4efe4" },
   { o: C.ink, k: "#3a3f4b", m: "#e0584f" },
   { y: "#f5c842", Y: "#c9971f", r: "#e0584f", b: "#4f8fe0" },
+  { o: C.ink, k: "#3a3546", K: "#5a5468", r: "#c23a3a" },
 ];
+
+/** Server-rack armour (outfit 12): seams and blinking lights over the top of the body. */
+// biome-ignore format: pixel art reads as a grid
+const RACK: Record<View, string[]> = {
+  down: [".....g.y.g......", "....llllllll....", ".....g.g.y......"],
+  side: [".......g.y......", ".....llllll.....", "......g........."],
+  up: ["................", "....llllllll....", "................"],
+};
+const RACK_COLORS: Palette = { l: "#8a93a1", g: "#3ddc84", y: "#f5c842" };
 
 const darken = (hex: string, f = 0.78) =>
   `#${[1, 3, 5]
@@ -367,6 +383,7 @@ export const characterFrame = cached(
     const pal = lookPalette(look);
     return bake(16, 16, (p) => {
       p.grid(BODIES[view][pose], pal, 0, 9, flip);
+      if (look.outfit === 12) p.grid(RACK[view], RACK_COLORS, 0, 9, flip);
       p.grid(HEADS[view][look.style] ?? HEADS[view][0]!, pal, 0, 0, flip);
       if (view !== "up")
         p.grid(GLASSES[look.glasses]?.[view] ?? [], GLASSES_COLORS[look.glasses] ?? {}, 0, 5, flip);

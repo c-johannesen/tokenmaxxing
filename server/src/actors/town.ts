@@ -37,7 +37,6 @@ import {
   type HoldKind,
   heldIn,
   hold,
-  ownedItems,
   type PayKind,
   pay,
   refund,
@@ -238,7 +237,7 @@ export const town = actor({
       const userId = requireUser(c.conn.state);
       const look = parseLook(rawLook);
       if (!look) throw new UserError("Unknown look.", { code: "invalid_look" });
-      const owned = new Set(await ownedItems(c.db, userId));
+      const owned = new Set((await wallet(c.db, userId, Date.now())).owned);
       if (itemsIn(look).some((i) => !owned.has(i.id)))
         throw new UserError("Buy it in the shop first.", { code: "not_owned" });
       await c.db.execute("UPDATE users SET look = ? WHERE id = ?", JSON.stringify(look), userId);
@@ -375,6 +374,8 @@ export const town = actor({
       const userId = requireUser(c.conn.state);
       const item = itemById(itemId);
       if (!item) throw new UserError("That's not in the shop.", { code: "not_found" });
+      if (item.level !== undefined)
+        throw new UserError("That one is earned, not bought.", { code: "not_for_sale" });
       return c.vars.serial(() => buy(c.db, userId, item, Date.now()));
     },
 

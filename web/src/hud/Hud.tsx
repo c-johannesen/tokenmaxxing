@@ -1,6 +1,7 @@
 import { isBot } from "@tokenmaxxing/core/bots.ts";
-import { compact } from "@tokenmaxxing/core/format.ts";
-import { useEffect, useState } from "react";
+import { compact, levelTitle } from "@tokenmaxxing/core/format.ts";
+import { levelItems } from "@tokenmaxxing/core/shop.ts";
+import { useEffect, useRef, useState } from "react";
 import { roomName, world } from "../game/world.ts";
 import { chatBeside, hud, useHud } from "../store.ts";
 import { AppSignIn } from "./AppSignIn.tsx";
@@ -49,6 +50,7 @@ export function Hud() {
       <MentionToast />
       <NoticeToast />
       <InviteToast />
+      <LevelToast />
       <FirstVisit />
     </>
   );
@@ -247,6 +249,35 @@ function NoticeToast() {
       onClick={() => hud.set({ notice: null, panel: { kind: "company" } })}
     >
       🏢 {notice.text}
+    </button>
+  );
+}
+
+/** My level went up while I was here; the first level after load is just where I started. */
+function LevelToast() {
+  const level = useHud((s) => s.stats?.level);
+  const seen = useRef<number | undefined>(undefined);
+  const [up, setUp] = useState<{ from: number; to: number; at: number } | null>(null);
+  useEffect(() => {
+    if (level === undefined) return;
+    if (seen.current !== undefined && level > seen.current)
+      setUp({ from: seen.current, to: level, at: Date.now() });
+    seen.current = level;
+  }, [level]);
+  if (!useFresh(up?.at, MENTION_MS) || !up) return null;
+  // The first reward passed on the way up: a big sync can skip a level or two.
+  const reward = levelItems(up.to).find((i) => i.level! > up.from);
+  return (
+    <button
+      type="button"
+      className="toast mention-toast"
+      onClick={() => {
+        setUp(null);
+        hud.set({ panel: { kind: "shop" } });
+      }}
+    >
+      ⬆️ Level {up.to} · {levelTitle(up.to)}
+      {reward && ` · You unlocked the ${reward.name}${reward.level === 10 ? " and your own office" : ""}`}
     </button>
   );
 }
