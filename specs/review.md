@@ -61,9 +61,7 @@ Fix: a new `core/src/office.ts` holding everything office-shaped: `Piece`, `FURN
 `web/src/hud/Trades.tsx`, `TradePanel`: `town.profile(userId, "today")` to get `them.name` and
 `them.owned`. `profile()` now also runs the badge queries and the podium ranking over every user.
 
-Fix: `town.office(userId)` already exists as a cheap per-player call; add `owned: string[]` (tradeable
-ids) and `name` to the `office` action's result and rename it to `peek` … no: keep it simpler. Add a tiny
-action in `town.ts`:
+Fix: a tiny action in `town.ts`:
 
 ```ts
 /** What `userId` could trade away, for the trade panel. */
