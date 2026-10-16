@@ -5,7 +5,7 @@
 import type { Seat, Spot } from "./games/gather.ts";
 import type { BoardRow, GameId } from "./games/types.ts";
 import { blockOf, doorOf, type GameMap, MAPS, type MapId, plotId, TOWN_SPAWN } from "./maps.ts";
-import { OFFICES, type Placed, STARTER_OFFICE, setOffice } from "./office.ts";
+import { type Door, doorAt, HQS, OFFICES, type Placed, STARTER_OFFICE, setOffice } from "./office.ts";
 
 export const TILE = 16;
 /** Client animation time per step; the server only enforces the running pace. */
@@ -41,11 +41,12 @@ export const companyOfRoom = (room: RoomId): number | null =>
 export const ownerOfOffice = (room: RoomId): number | null =>
   room.startsWith("office:") ? Number(room.slice(7)) : null;
 
-/** An office nobody has furnished yet holds `STARTER_OFFICE`. */
+/** An office nobody has furnished yet holds `STARTER_OFFICE`; a building nobody has built is the bare floor. */
 export function mapOf(room: RoomId): GameMap {
   const owner = ownerOfOffice(room);
   if (owner !== null) return OFFICES.get(owner) ?? setOffice(owner, STARTER_OFFICE);
-  return MAPS[room.startsWith("hq:") ? "hq" : (room as MapId)];
+  const company = companyOfRoom(room);
+  return company !== null ? (HQS.get(company) ?? MAPS.hq) : MAPS[room as MapId];
 }
 
 // MARK: Looks
@@ -211,6 +212,8 @@ export interface Snapshot {
   /** Only in an office: its furniture, and whose it is (for the banner). */
   furniture: Placed[] | null;
   owner: { id: number; name: string } | null;
+  /** Only in a building: its office doors, to build the map and draw the names. */
+  doors: Door[];
 }
 
 /** A game on show in town: where its table (or arena) is, who's at it, and how it's going. */
@@ -338,22 +341,24 @@ export function outsideDoor(plot: number | "inn"): Place {
 }
 
 /**
- * Where the portal at (x, y) takes player `userId`, or why it doesn't. `plots` maps a plot to the
- * company holding it. The office door takes everyone to their own office (the level gate is the
- * world's); leaving an office goes back to your own company's building.
+ * Where the portal at (x, y) takes you, or why it doesn't. `plots` maps a plot to the company holding
+ * it; `doors` are your own company building's. An office door takes you to its owner's office (open or
+ * closed is the world's to check); leaving an office puts you below its door in your own building, if
+ * it has one, else at your building's entry.
  */
 export function portal(
   room: RoomId,
   door: { ch: string; x: number; y: number },
   companyId: number | null,
   plots: ReadonlyMap<number, { id: number; name: string }>,
-  userId: number,
+  doors: readonly Door[] = [],
 ): Place | { notice: string } {
-  if (door.ch === "R") return roomEntry(`office:${userId}`);
-  if (ownerOfOffice(room) !== null) {
+  if (door.ch === "R") return roomEntry(`office:${doorAt(doors, door.x, door.y)!.userId}`);
+  const owner = ownerOfOffice(room);
+  if (owner !== null) {
     if (companyId === null) return roomEntry("inn");
-    const [x, y] = MAPS.hq.find("R")[0]!;
-    return { room: `hq:${companyId}`, x, y: y + 1, facing: "down" };
+    const d = doors.find((d) => d.userId === owner);
+    return d ? { room: `hq:${companyId}`, x: d.x, y: d.y + 1, facing: "down" } : roomEntry(`hq:${companyId}`);
   }
   if (room === "town") {
     if (door.ch === "I") return roomEntry("inn");

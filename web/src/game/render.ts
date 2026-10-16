@@ -109,6 +109,13 @@ export function render(canvas: HTMLCanvasElement, now: number): void {
     if (inside.length) labels.push(() => chips(g, sx, sy + 4 * dpr, inside, dpr));
   }
 
+  // Office doors: the owner's name over each, 🔒 when it's closed; yours stands out.
+  for (const d of world.doors) {
+    const [sx, sy] = toScreen((d.x + 0.5) * TILE, d.y * TILE);
+    const text = `${d.open ? "" : "🔒 "}${d.name}`;
+    labels.push(() => sign(g, sx, sy, text, dpr, d.userId === world.selfId, 1.9 * TILE * scale));
+  }
+
   drawGames(g, items, labels, toScreen, now, dpr);
 
   const dt = Math.min(100, now - lastFrame);

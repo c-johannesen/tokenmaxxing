@@ -84,16 +84,12 @@ describe("maps", () => {
     });
   }
 
-  test("offices: the starter desk has its chair in front, a TV takes two tiles, the door is in hq only", () => {
+  test("offices: the starter desk has its chair in front, a TV takes two tiles", () => {
     const office = officeMap(STARTER_OFFICE);
     const [dx, dy] = office.find("d")[0]!;
     expect(office.at(dx, dy + 1)).toBe("c");
     const tv = officeMap([{ ch: "t", x: 2, y: 1 }]);
     expect([tv.at(2, 1), tv.at(3, 1), tv.at(4, 1)]).toEqual(["t", "t", "_"]);
     expect(MAPS.office.find("d")).toEqual([]); // the template stays bare
-    const [rx, ry] = MAPS.hq.find("R")[0]!;
-    expect(MAPS.hq.kind(rx, ry).portal).toBe(true);
-    expect(MAPS.hq.walkable(rx, ry + 1)).toBe(true);
-    expect(MAPS.inn.find("R")).toEqual([]);
   });
 });

@@ -45,7 +45,7 @@ export const LEGEND: Record<string, TileKind> = {
   I: { name: "inn door", portal: true },
   x: { name: "exit", portal: true },
   D: { name: "door", portal: true },
-  R: { name: "office door", portal: true, text: "Your office." },
+  R: { name: "office door", portal: true },
 };
 
 /**
@@ -296,9 +296,10 @@ export const TOWN_SPAWN: [number, number] = [9, 5];
 export const MAPS: Record<MapId, GameMap> = {
   // Rebuilt from the companies in it (setTown); until then, just the square.
   town: townMap([]),
+  // The floor; each company's building adds its hallways of office doors above it (hqMap).
   hq: new GameMap("hq", "Company house", [
     "WWWWWWWWWWWWWWWWWWWWWW",
-    "WWWWWWWWWWWWWRWWWWWWWW",
+    "WWWWWWWWWWWWWWWWWWWWWW",
     "Wkk_b_b_b_b_p__dddd_oW",
     "W______________cccc__W",
     "W____________________W",

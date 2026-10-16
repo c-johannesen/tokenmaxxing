@@ -99,3 +99,17 @@ export const doorAt = (doors: readonly Door[], x: number, y: number): Door | und
   the more vivid version and the bigger rewrite: furniture for every member in one map, editor offsets,
   the building becomes a tower past a dozen members, and open/closed becomes door locking. Doors with
   nameplates get the same "walk from the building into an office" with what's already built.
+
+## As built
+
+- The hallways need a way in: a one-tile gap at x = 14 (between two doors) runs up through every wall from
+  the floor to the top hallway.
+- `doorsFor` is pure, so slots aren't kept: when a door goes, the later ones move down a slot (no gaps).
+  The wall guard in `buildHq` catches anyone left in a hallway that went.
+- `doorsFor` takes `open` with each owner, so the doors come out ready for the snapshot.
+- `portal` lost `userId` (only the old door used it); `doors` defaults to `[]`.
+- An office's exit with no door for its owner in your building (a visitor, or a door that went) lands at
+  your building's entry.
+- `setPlayer` also rebuilds on a rename (it's on the door), and `setOffice` resends the building when an
+  office opens or closes, so the 🔒 shows at once. A closed company's map leaves `HQS`.
+- The names are drawn in `render.ts` with `labels.ts`'s `sign`, like a house's; your own door's is light.
