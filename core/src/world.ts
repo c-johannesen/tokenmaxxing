@@ -43,16 +43,16 @@ export const ownerOfOffice = (room: RoomId): number | null =>
   room.startsWith("office:") ? Number(room.slice(7)) : null;
 
 /** Every office is the template (its furniture is its drops); a building nobody has built is the bare floor. */
-function baseMap(room: RoomId): GameMap {
+export function baseMap(room: RoomId): GameMap {
   if (ownerOfOffice(room) !== null) return MAPS.office;
   const company = companyOfRoom(room);
   return company !== null ? (HQS.get(company) ?? MAPS.hq) : MAPS[room as MapId];
 }
 
 /**
- * A room's map, with the furniture dropped in it written over the floor (parcels aren't in it). Kept
- * until its drops or its own map change. ponytail: a parcel rebuilds it too (and the client bakes the
- * ground again); leave parcels out of the key if they ever churn.
+ * A room's map, with the furniture dropped in it written over the floor (other drops aren't in it). Kept
+ * until its drops or its own map change. ponytail: a dropped hat or pet rebuilds it too (and the client
+ * bakes the ground again); leave those out of the key if they ever churn.
  */
 export function mapOf(room: RoomId): GameMap {
   const base = baseMap(room);
@@ -89,7 +89,7 @@ export function setDrops(room: RoomId, drops: readonly Drop[]): void {
   dropped.delete(room);
 }
 
-/** A dropped piece of furniture (`furn.<ch>`); wearables and pets lie in a parcel instead. */
+/** A dropped piece of furniture (`furn.<ch>`); wearables and pets lie on the floor as themselves. */
 export const pieceOfDrop = (d: Pick<Drop, "item">): Piece | undefined =>
   d.item.startsWith("furn.") ? pieceOf(d.item.slice(5)) : undefined;
 
@@ -264,7 +264,7 @@ export interface Snapshot {
   owner: { id: number; name: string; open: boolean } | null;
   /** Only in a building: its office doors, to build the map and draw the names. */
   doors: Door[];
-  /** What's on the floor: furniture (in the map too) and parcels. */
+  /** What's on the floor: furniture (in the map too), wearables and pets. */
   drops: Drop[];
 }
 

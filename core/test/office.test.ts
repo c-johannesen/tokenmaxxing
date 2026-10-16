@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { MAPS } from "../src/maps.ts";
-import { doorsFor, hqMap } from "../src/office.ts";
+import { doorsFor, hqMap, withPieces } from "../src/office.ts";
 import { route } from "../src/world.ts";
 
 describe("offices", () => {
@@ -32,5 +32,15 @@ describe("offices", () => {
     );
     const [ex, ey] = tower.find("x")[0]!;
     for (const [x, y] of tower.find("R")) expect(route(tower, [ex, ey - 1], [x, y])).not.toBeNull();
+  });
+
+  test("furniture is written over floor only: never over a wall or a door", () => {
+    const pieces = [
+      { ch: "d", x: 0, y: 0 },
+      { ch: "d", x: 5, y: 8 },
+      { ch: "t", x: 10, y: 1 },
+    ];
+    const map = withPieces(pieces, MAPS.office);
+    expect([map.at(0, 0), map.at(5, 8), map.at(10, 1), map.at(11, 1)]).toEqual(["W", "x", "t", "W"]);
   });
 });

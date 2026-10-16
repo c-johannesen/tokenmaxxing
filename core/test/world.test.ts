@@ -114,7 +114,7 @@ describe("drops", () => {
     at: 0,
   });
 
-  test("dropped furniture is in the room's map, kept until the drops change; parcels aren't", () => {
+  test("dropped furniture is in the room's map, kept until the drops change; a pet isn't", () => {
     setDrops("inn", [drop(1, "furn.s", 3, 3), drop(2, "furn.t", 5, 3), drop(3, "pet.1", 8, 3)]);
     const map = mapOf("inn");
     expect([3, 5, 6, 8].map((x) => map.at(x, 3))).toEqual(["s", "t", "t", "_"]);

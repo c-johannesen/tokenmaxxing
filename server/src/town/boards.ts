@@ -16,7 +16,7 @@ import {
   totals,
   type UsageRow,
 } from "../stats.ts";
-import { officeOf, podiumDays } from "./coins.ts";
+import { officeOf, type Podium } from "./coins.ts";
 import { COMPANY_COLS, type CompanyRow, companyById, companyInfos } from "./companies.ts";
 import { type GameStats, gameStats } from "./games.ts";
 import { lookOf, TOKENS, tokensIn, USER_COLS, type UserRow, userById } from "./users.ts";
@@ -173,7 +173,14 @@ export async function boards(sql: Sql, range: RangeKey, sort: SortKey, now: numb
   return { players, companies: rank(companyRows, sort) };
 }
 
-export async function profile(sql: Sql, userId: number, range: RangeKey, now: number): Promise<Profile> {
+/** `top`: every finished day's top 3 (`podiums`). */
+export async function profile(
+  sql: Sql,
+  userId: number,
+  range: RangeKey,
+  now: number,
+  top: Podium[],
+): Promise<Profile> {
   const u = await userById(sql, userId);
   const [from, to] = bounds(range, now);
   const usage = await all<UsageRow>(
@@ -196,7 +203,7 @@ export async function profile(sql: Sql, userId: number, range: RangeKey, now: nu
   const co = u.companyId === null ? undefined : await companyById(sql, u.companyId);
   const company = co ? { id: co.id, name: co.name } : null;
   const games = await gameStats(sql, userId);
-  // Badges. ponytail: four small queries per profile; fine for a card, cache per user if the card gets polled.
+  // Badges: two small queries, and the podiums `town` keeps for the day.
   const days = await all<{ day: string; tokens: number }>(
     sql,
     `SELECT day, SUM(${TOKENS}) AS tokens FROM usage_daily WHERE user_id = ? GROUP BY day`,
@@ -210,7 +217,7 @@ export async function profile(sql: Sql, userId: number, range: RangeKey, now: nu
   const badges = badgesFor({
     streak: streakOf(new Set(days.filter((d) => d.tokens > 0).map((d) => d.day)), dayKey(now)),
     bestDay: Math.max(0, ...days.map((d) => d.tokens)),
-    podiums: (await podiumDays(sql, userId, now)).length,
+    podiums: top.filter((p) => p.userId === userId).length,
     peakAgents: best?.peakAgents ?? 0,
     prs: best?.prs ?? 0,
     wins: games?.wins ?? 0,

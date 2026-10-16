@@ -13,7 +13,8 @@ export async function pushPlayers(
   userIds: number[],
 ): Promise<void> {
   const world = main(client).world;
-  for (const p of await playerCores(sql, userIds)) await world.setPlayer(p);
+  // A door that came or went can leave drops where the building has no place for them: they go home.
+  for (const p of await playerCores(sql, userIds)) await giveBack(sql, await world.setPlayer(p));
 }
 
 export async function push(sql: Sql, client: Client<typeof registry>, changed: Changed): Promise<void> {
@@ -22,9 +23,9 @@ export async function push(sql: Sql, client: Client<typeof registry>, changed: C
   const infos = await companyInfos(sql, companies);
   for (const id of companies) {
     const info = infos.find((i) => i.id === id);
-    if (info) await world.setCompany(info);
-    // Closed: what was dropped in its building goes back to whoever dropped it.
-    else await giveBack(sql, await world.removeCompany(id));
+    // Drops the town has no place for any more go back to whoever dropped them; for a closed company,
+    // what was in its building too.
+    await giveBack(sql, await (info ? world.setCompany(info) : world.removeCompany(id)));
   }
   await pushPlayers(sql, client, [...new Set(changed.users)]);
 }

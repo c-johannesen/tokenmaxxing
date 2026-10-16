@@ -46,12 +46,15 @@ export const STARTER_OFFICE: readonly Placed[] = [
   { ch: "c", x: 5, y: 4 },
 ];
 
-/** A map with these pieces written over its floor: a room's dropped furniture (`mapOf`). */
+/**
+ * A map with these pieces written over its floor: a room's dropped furniture (`mapOf`). Only over floor:
+ * a wall or door the map gained under a piece stays a wall or door.
+ */
 export function withPieces(pieces: readonly Placed[], base: GameMap): GameMap {
   const rows = base.rows.map((r) => [...r]);
   for (const p of pieces)
     for (let i = 0; i < (pieceOf(p.ch)?.w ?? 1); i++)
-      if (base.contains(p.x + i, p.y)) rows[p.y - base.y0]![p.x + i - base.x0] = p.ch;
+      if (base.walkable(p.x + i, p.y)) rows[p.y - base.y0]![p.x + i - base.x0] = p.ch;
   return new GameMap(
     base.id,
     base.name,
@@ -71,9 +74,9 @@ export interface Door {
   x: number;
   y: number;
 }
-export const DOORS_PER_HALLWAY = 10;
-/** The gap up through the walls from the floor to every hallway: between two doors. */
-const PASSAGE_X = 14;
+const DOORS_PER_HALLWAY = 10;
+/** The gap up through the walls from the floor (from y = 2) to every hallway: between two doors. */
+export const PASSAGE_X = 14;
 
 /**
  * Door slots for these owners (sorted by id): slot n is hallway ⌊n/10⌋, tile 1 + 2·(n mod 10).

@@ -1,5 +1,5 @@
 import { frontier } from "@tokenmaxxing/core/maps.ts";
-import { isRangeKey } from "@tokenmaxxing/core/range.ts";
+import { dayKey, isRangeKey } from "@tokenmaxxing/core/range.ts";
 import {
   emptySide,
   isTradeable,
@@ -62,9 +62,11 @@ import {
   offices,
   ownedItems,
   type PayKind,
+  type Podium,
   pay,
   pickUp,
   placed,
+  podiums,
   refund,
   setBalance,
   settleTrade,
@@ -221,6 +223,8 @@ export const town = actor({
     renames: new RateLimiter(RENAMES_PER_HOUR, HOUR),
     /** Verified tokens, so a burst of calls doesn't ask `player` every time. */
     tokens: new Map() as TokenCache,
+    /** `podiums` for a world day, for wallets and cards; a late sync or a wiped account drops it. */
+    podiums: null as { day: string; rows: Promise<Podium[]> } | null,
   }),
   db: db({ onMigrate: migrate }),
   onCreate: (c) => requireMain(c),
@@ -300,10 +304,13 @@ export const town = actor({
       const userId = requireUser(c.conn.state);
       const look = parseLook(rawLook);
       if (!look) throw new UserError("Unknown look.", { code: "invalid_look" });
-      const owned = new Set(await ownedItems(c.db, userId));
-      if (itemsIn(look).some((i) => !owned.has(i.id)))
-        throw new UserError("You don't have one in your bag.", { code: "not_owned" });
-      await c.db.execute("UPDATE users SET look = ? WHERE id = ?", JSON.stringify(look), userId);
+      // Serialized, so a drop or a trade can't take it off between the check and the write.
+      await c.vars.serial(async () => {
+        const owned = new Set(await ownedItems(c.db, userId));
+        if (itemsIn(look).some((i) => !owned.has(i.id)))
+          throw new UserError("You don't have one in your bag.", { code: "not_owned" });
+        await c.db.execute("UPDATE users SET look = ? WHERE id = ?", JSON.stringify(look), userId);
+      });
       await pushPlayers(c.db, c.client<typeof registry>(), [userId]);
     },
 
@@ -440,7 +447,8 @@ export const town = actor({
       return myCompany(c.db, company.id, userId);
     },
 
-    wallet: (c): Promise<Wallet> => wallet(c.db, requireUser(c.conn.state), Date.now()),
+    wallet: async (c): Promise<Wallet> =>
+      wallet(c.db, requireUser(c.conn.state), Date.now(), await podiumsOf(c, Date.now())),
 
     /** What I hold, per kind, for the bag panel. */
     bag: (c): Promise<BagRow[]> => bag(c.db, requireUser(c.conn.state)),
@@ -477,24 +485,25 @@ export const town = actor({
           console.warn(`[drop] ${id}: ${String(err)}`);
           return { notice: "That didn't work. Try again." };
         });
+      let off = false;
       const out = await c.vars.serial(async () => {
         if ("notice" in put) {
           await giveBack(c.db, [id]);
           return put;
         }
         await placed(c.db, put);
-        await unwear(c.db, userId, [put.item]);
+        off = await unwear(c.db, userId, [put.item]);
         return { notice: `Dropped the ${dropName(put)}.`, drop: put };
       });
       // Off it comes, if it was the last one worn.
-      if ("drop" in out) await pushPlayers(c.db, client, [userId]);
+      if (off) await pushPlayers(c.db, client, [userId]);
       return out;
     },
 
-    /** From `world.take`: a drop into the taker's bag. False if it went back to its dropper first. */
-    pickUp: async (c, dropId: number, userId: number): Promise<boolean> => {
+    /** From `world.take`: a drop on `room`'s floor into the taker's bag. False if it isn't there any more. */
+    pickUp: async (c, dropId: number, userId: number, room: string): Promise<boolean> => {
       requireInternal(c.conn.state);
-      return pickUp(c.db, dropId, userId);
+      return pickUp(c.db, dropId, userId, room);
     },
 
     /** The alarm, every 10 minutes: drops nobody took in an hour go back to whoever dropped them. */
@@ -574,7 +583,7 @@ export const town = actor({
       // Looks may have changed.
       await pushPlayers(c.db, client, [trade.fromId, userId]);
       await notify(client, trade.fromId, { text: `${trade.to} accepted your trade.`, open: "bag" });
-      return wallet(c.db, userId, now);
+      return wallet(c.db, userId, now, await podiumsOf(c, now));
     },
 
     declineTrade: async (c, fromId: unknown): Promise<void> => {
@@ -602,8 +611,17 @@ export const town = actor({
       if (!c.vars.offices.take(String(userId), Date.now()))
         throw new UserError("That's a lot of changes. Try again in a minute.", { code: "rate_limited" });
       if (typeof open !== "boolean") throw new UserError("Open or closed?", { code: "invalid_office" });
-      await c.db.execute("UPDATE offices SET open = ? WHERE user_id = ?", open ? 1 : 0, userId);
-      await pushOffice(c.db, c.client<typeof registry>(), userId);
+      const client = c.client<typeof registry>();
+      const drops = await c.vars.serial(async () => {
+        // Level 10 from before offices had rows: its row, and its desk and chair, come now.
+        const drops = await grantRewards(c.db, userId, await levelOf(c.db, userId), Date.now());
+        const set = "UPDATE offices SET open = ? WHERE user_id = ? RETURNING user_id";
+        if (!(await one(c.db, set, open ? 1 : 0, userId)))
+          throw new UserError("You don't have an office yet.", { code: "not_found" });
+        return drops;
+      });
+      await placeStarter(client, drops);
+      await pushOffice(c.db, client, userId);
     },
 
     /** From `player` after an ingest: replaces those days' rollups and hands out level rewards reached. */
@@ -618,6 +636,8 @@ export const town = actor({
       const drops = await c.vars.serial(() =>
         c.db.transaction(
           async (tx) => {
+            // Deleted meanwhile: nothing of theirs is written back.
+            await userById(tx, userId);
             const inDays = `day IN (${days.map(() => "?").join(",")})`;
             await tx.execute(`DELETE FROM usage_daily WHERE user_id = ? AND ${inDays}`, userId, ...days);
             await insertRows(
@@ -659,8 +679,9 @@ export const town = actor({
           { name: "report-usage" },
         ),
       );
-      // Level 10: the office's desk and chair, on its floor.
-      if (drops.length > 0) await main(c.client<typeof registry>()).world.placeDrops(drops);
+      // A finished day changed: its podium may have too.
+      if (days.some((d) => d < dayKey(Date.now()))) c.vars.podiums = null;
+      await placeStarter(c.client<typeof registry>(), drops);
       const u = await userById(c.db, userId);
       await push(c.db, c.client<typeof registry>(), {
         users: [userId],
@@ -688,7 +709,7 @@ export const town = actor({
       requireUser(c.conn.state);
       if (typeof targetId !== "number") throw new UserError("Unknown player.", { code: "not_found" });
       const range = isRangeKey(rawRange) ? rawRange : "30d";
-      return profile(c.db, targetId, range, Date.now());
+      return profile(c.db, targetId, range, Date.now(), await podiumsOf(c, Date.now()));
     },
 
     /** Names starting with `prefix`, for @-mention suggestions. */
@@ -827,6 +848,7 @@ export const town = actor({
       const client = c.client<typeof registry>();
       const days = await client.player.get([String(user.id)], internal).wipe();
       await c.vars.serial(() => wipeUsage(c.db, user.id));
+      c.vars.podiums = null;
       await push(c.db, client, {
         users: [user.id],
         companies: user.companyId === null ? [] : [user.companyId],
@@ -840,6 +862,7 @@ export const town = actor({
       const user = await adminTarget(c.db, userId);
       const now = Date.now();
       const changed = await c.vars.serial(() => deleteUser(c.db, user.id, now));
+      c.vars.podiums = null;
       await logAdmin(c.db, "delete user", who(user), null, now);
       const client = c.client<typeof registry>();
       await push(c.db, client, changed);
@@ -939,6 +962,31 @@ async function renameCompany(sql: Sql, client: Client, companyId: number, rawNam
   const name = companyName(rawName);
   await sql.execute("UPDATE companies SET name = ? WHERE id = ?", name, companyId);
   await push(sql, client, { companies: [companyId], users: [] });
+}
+
+/** Every finished day's top 3, worked out once a world day (or after something changed them). */
+function podiumsOf(
+  c: { db: Sql; vars: { podiums: { day: string; rows: Promise<Podium[]> } | null } },
+  now: number,
+): Promise<Podium[]> {
+  const day = dayKey(now);
+  if (c.vars.podiums?.day !== day) {
+    const rows = podiums(c.db, now);
+    c.vars.podiums = { day, rows };
+    // A failed one isn't kept.
+    rows.catch(() => {
+      if (c.vars.podiums?.rows === rows) c.vars.podiums = null;
+    });
+  }
+  return c.vars.podiums.rows;
+}
+
+/** A new office's desk and chair onto its floor. If `world` misses them, its next start lays them (`seed`). */
+async function placeStarter(client: Client, drops: Drop[]): Promise<void> {
+  if (drops.length === 0) return;
+  await main(client)
+    .world.placeDrops(drops)
+    .catch((err) => console.warn(`[office] ${String(err)}`));
 }
 
 /** The open offer `fromId` made me, or `not_found`. */

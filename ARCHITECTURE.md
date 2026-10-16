@@ -169,18 +169,19 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 - Coins: `wallet`, `buy`, `bag`; for `arcade`: `hold`, `pay`, `refund`, `recordMatch`. Games: `gameBoard`.
 - Trades: `offerTrade` (10 an hour; a new offer replaces your old one), `trades`, `acceptTrade`,
   `declineTrade`, `withdrawTrade`. See *Coins and the shop*.
-- Offices: `setOfficeOpen` (your own; 30 a minute, since each one sends the office and its building to
-  everyone inside). What's in an office is what its owner dropped there.
+- Offices: `setOfficeOpen` (your own, from level 10; 30 a minute, since each one sends the office and its
+  building to everyone inside). What's in an office is what its owner dropped there.
 - Drops: `drop` (30 a minute) takes one of a kind out of your bag (not a reward; at most 5 of yours on the
   floor at once, not counting your own office's) and asks `world.placeDrop` to put it where you are; a full
   room says so, and the row comes straight back. On the floor a row has `owner_id` NULL, with `dropped_by`
   and `dropped_at`, and `room`, `x`, `y` once `world` has put it down (`placed`). `pickUp` (from
-  `world.take`) puts it in the taker's bag, unless it's gone home already. **The sweeper** is a cron alarm
+  `world.take`) puts it in the taker's bag, if it's still on that room's floor. **The sweeper** is a cron alarm
   (`sweep`, every 10 minutes; it outlives restarts and wakes the town): drops nobody took in an hour come
   off the floor (`world.removeDrops`) and go back to their droppers, except what's in its dropper's own
   office: that's furniture. A closed company's building and a deleted owner's office give theirs back at
-  once (`removeCompany` and `removePlayer` return the ids); a deleted account's own drops are deleted with
-  it, office furniture and all.
+  once (`removeCompany` and `removePlayer` return the ids), and so does a rebuilt town or building for
+  drops it has no place for any more (`setCompany` and `setPlayer` return them); a deleted account's own
+  drops are deleted with it, office furniture and all.
 - Admin (`town/admin.ts`, for `/admin`): `adminOverview`, `adminUsers` and `adminCompanies`; rename people
   and companies; set a balance (the difference goes in the `ledger` as kind and ref `admin`); take someone
   out of their company; close a company; wipe someone's usage (their `player` drops its raw events too:
@@ -203,14 +204,17 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   an office floor, only its owner).
 - Events: `snapshot` (on joining or changing room), `moves`, `info`, `companies`, `occupancy`, `houses`, `notice`,
   `chat`, `mention`, `drop`, `pickup`.
-- **Drops** (`DROPS`, in memory only: `town` has every floor, and a starting world lays them again from
-  `seed`; at most 30 a room, 40 an office): a parcel on the dropper's tile or the nearest free one,
-  furniture on the tile they face or the nearest free one to it, as itself in the room's map (`mapOf`), so
-  a dropped sofa seats. An office's map is the template and its drops. `take` lifts it off the floor first,
-  then asks `town.pickUp`; if that call fails, it goes back down.
+- **Drops** (`DROPS`, in memory only: `town` has every floor, and a starting world forgets its own and lays
+  them again from `seed`; at most 30 a room, 40 an office): a hat or a pet lies as itself on the dropper's
+  tile or the nearest free one; furniture goes on the tile they face or the nearest free one to it, as
+  itself in the room's map (`mapOf`), so a dropped sofa seats. Furniture never lands in front of a door, in
+  a building's hallways or at the foot of the passage up to them, or where it would leave anyone in the room
+  no way out. An office's map is the template and its drops. `take` lifts it off the floor first, then asks
+  `town.pickUp`; if that call fails, it goes back down.
 - **Resting.** Closing the last tab sends you to your bed; offline with agents active in the last 10 minutes, to
   your desk. Company members rest in their house, others at the Inn. Your spot is remembered: the next `join` puts
-  you back there, unless it's a house you've left or someone's office that closed (`back` after a game too).
+  you back there, unless it's a house you've left, an office that's closed or gone, or a tile that's a wall or
+  furniture now (`back` after a game too); a seat that's gone, you wake standing where it was.
   Online with 3 minutes without input, you just doze where you are (`dozing`, drawn as a "z") until
   your next input, so a town left open on a second screen keeps showing what's going on.
 
@@ -244,7 +248,8 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 - Three items are earned, not bought: a top hat, server-rack armour and a Singularity orb, at levels 10, 20
   and 30. `report` hands them out as rows the first time a sync reaches the level (`grantRewards`, once each,
   recorded in `rewards`), with the office's desk and chair at level 10, dropped on its floor
-  (`starterDrops`). Rewards are `tradeable: false`.
+  (`starterDrops`; in the bag if it has furniture already). `setOfficeOpen` hands them out too, for anyone
+  who reached level 10 before offices had rows. Rewards are `tradeable: false`.
 - **Trades** (from a player card): up to 🪙 500 and 4 items each way, for 7 days; not rewards, and not
   furniture on a floor (pick it up first). Accepting re-checks both sides under `serial` and moves everything in one
   transaction (`settleTrade`): coins through the `ledger` (kind `trade`), items by moving one row of each kind
@@ -255,8 +260,9 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   10 above the building's floor (negative `y`, `hqMap`), which `world` rebuilds when a door comes or goes.
   Furniture is the map legend's own pieces, bought into the bag and furnished by dropping: in your own
   office a drop stays (no hour, no five), at most 40, and only you take anything off its floor, a
-  visitor's gift too. The Menu opens or closes it while you're in it. Anyone in the building walks into an
-  open office; from outside, from the owner's card.
+  visitor's gift too. The Menu opens or closes it while you're in it; opening it clears its chat, so
+  visitors never read what was said while it was closed. Anyone in the building walks into an open office;
+  from outside, from the owner's card.
 
 ## Games
 

@@ -8,7 +8,7 @@ import {
   spotSize,
 } from "@tokenmaxxing/core/games/gather.ts";
 import type { GameId } from "@tokenmaxxing/core/games/types.ts";
-import { LEGEND, setTown, TOWN_SPAWN } from "@tokenmaxxing/core/maps.ts";
+import { type GameMap, LEGEND, setTown, TOWN_SPAWN } from "@tokenmaxxing/core/maps.ts";
 import {
   type Door,
   doorAt,
@@ -16,9 +16,12 @@ import {
   HQS,
   OFFICE_LEVEL,
   OFFICE_PIECES,
+  PASSAGE_X,
   setHq,
+  withPieces,
 } from "@tokenmaxxing/core/office.ts";
 import {
+  baseMap,
   CHAT_HISTORY,
   type ChatLine,
   type CompanyInfo,
@@ -52,6 +55,7 @@ import {
   type RoomId,
   restSpot,
   roomEntry,
+  route,
   type Snapshot,
   STEP_BURST,
   type StepResult,
@@ -222,6 +226,8 @@ export const world = actor({
     placeBots(c.state);
     buildTown(c.state);
     for (const id of Object.keys(c.state.companies)) buildHq(c.state, Number(id));
+    // `seed` is every floor: what was here before sleeping (a drop whose call failed, say) goes.
+    for (const room of DROPS.keys()) setDrops(room, []);
     for (const d of seed.drops) lay(c, d);
   },
   onDisconnect: (c, conn) => {
@@ -354,8 +360,8 @@ export const world = actor({
     },
 
     /**
-     * G: the drop you're on (standing on a parcel or rug, sitting on a seat), else a piece nobody can be
-     * on that you face. Off an office floor, only its owner takes anything. `town` puts it in your bag.
+     * G: the drop you're on (standing on it or a rug, sitting on a seat), else a piece nobody can be on
+     * that you face. Off an office floor, only its owner takes anything. `town` puts it in your bag.
      */
     take: async (c): Promise<null | { notice: string; drop?: Drop }> => {
       const userId = requireUser(c.conn.state);
@@ -376,7 +382,7 @@ export const world = actor({
       // Off the floor before asking `town`, so nobody takes it twice meanwhile.
       lift(c, d);
       const took = await main(c.client())
-        .town.pickUp(d.id, userId)
+        .town.pickUp(d.id, userId, d.room)
         .catch((err) => {
           console.warn(`[take] ${d.id}: ${String(err)}`);
           return null;
@@ -430,8 +436,7 @@ export const world = actor({
       const p = c.state.players[userId];
       const owner = typeof targetId === "number" ? c.state.players[targetId] : undefined;
       if (!p || p.state === "playing") return null;
-      if (!owner || owner.level < OFFICE_LEVEL || owner.companyId === null)
-        return { notice: "They don't have an office yet." };
+      if (!owner || !hasOffice(owner)) return { notice: "They don't have an office yet." };
       if (owner.id !== userId && !officeOf(c.state, owner.id).open)
         return { notice: `🔒 ${owner.name}'s office is closed.` };
       touch(c, p, Date.now());
@@ -545,7 +550,8 @@ export const world = actor({
       sendToRoom(c, "town", "game", g);
     },
 
-    setPlayer: async (c, core: PlayerCore): Promise<void> => {
+    /** From `town`. Returns drops a building that lost or gained a door had no place for, to give back. */
+    setPlayer: async (c, core: PlayerCore): Promise<number[]> => {
       requireInternal(c.conn.state);
       const before = c.state.players[core.id]?.companyId;
       const hadDoor = doorKey(c.state.players[core.id]);
@@ -564,8 +570,11 @@ export const world = actor({
       }
       c.broadcast("info", info(p, online));
       // A door came, went or was renamed: in the old building and the new one.
+      const lifted: number[] = [];
       if (doorKey(p) !== hadDoor)
-        for (const id of new Set([before, p.companyId])) if (id != null) await rebuildHq(c, id);
+        for (const id of new Set([before, p.companyId]))
+          if (id != null) lifted.push(...(await rebuildHq(c, id)));
+      return lifted;
     },
 
     /**
@@ -591,27 +600,30 @@ export const world = actor({
         const s = conn.state as ConnState;
         if (s.kind === "user" && s.userId === userId) void conn.disconnect("deleted");
       }
-      if (p.companyId !== null) await rebuildHq(c, p.companyId);
+      if (p.companyId !== null) ids.push(...(await rebuildHq(c, p.companyId)));
       return ids;
     },
 
-    setCompany: (c, company: CompanyInfo): void => {
+    /** From `town`. Returns drops the rebuilt town has no place for, to give back. */
+    setCompany: (c, company: CompanyInfo): number[] => {
       requireInternal(c.conn.state);
       c.state.companies[company.id] = company;
       buildTown(c.state, c.vars.dirty);
       c.broadcast("companies", Object.values(c.state.companies));
+      return liftMisplaced(c, "town");
     },
 
-    /** A company closed. Returns the drops on its building's floor, for `town` to give back. */
+    /** A company closed. Returns the drops on its building's floor, and any its plot had, to give back. */
     removeCompany: async (c, id: number): Promise<number[]> => {
       requireInternal(c.conn.state);
       delete c.state.companies[id];
       const drops = dropsIn(`hq:${id}`);
       for (const d of drops) lift(c, d);
       buildTown(c.state, c.vars.dirty);
+      const ids = [...drops.map((d) => d.id), ...liftMisplaced(c, "town")];
       await rebuildHq(c, id);
       c.broadcast("companies", Object.values(c.state.companies));
-      return drops.map((d) => d.id);
+      return ids;
     },
 
     /** From `town`: an office opened or closed. Whoever is inside sees it; closing throws nobody out. */
@@ -620,6 +632,8 @@ export const world = actor({
       if (officeOf(c.state, userId).open === open) return;
       c.state.offices ??= {};
       c.state.offices[userId] = { open };
+      // What was said while it was closed stays private.
+      if (open) await c.db.execute("DELETE FROM chat WHERE room = ?", `office:${userId}`);
       await resend(c, `office:${userId}`);
       // The 🔒 on their door.
       const companyId = c.state.players[userId]?.companyId;
@@ -636,10 +650,9 @@ export const world = actor({
     },
 
     /**
-     * From `town`: an item on the floor of the room its dropper is in. A parcel goes on their tile, or the
-     * nearest free one; furniture on the tile they face, or the nearest free floor tile to it, that isn't
-     * a doorway or in front of one.
-     * ponytail: no reachability check: you can wall off an office's entry; a visitor can still step out.
+     * From `town`: an item on the floor of the room its dropper is in. A hat or a pet goes on their tile,
+     * or the nearest free one; furniture on the tile they face, or the nearest free floor tile to it
+     * where it's in nobody's way (`noFurniture`) and walls nobody in.
      */
     placeDrop: (c, { id, item, by }: { id: number; item: string; by: number }): Drop | { notice: string } => {
       requireInternal(c.conn.state);
@@ -649,21 +662,32 @@ export const world = actor({
       if (!p || here.length >= (ownerOfOffice(p.room) === null ? DROPS_PER_ROOM : OFFICE_PIECES)) return full;
       const map = mapOf(p.room);
       const piece = pieceOfDrop({ item });
-      // One drop per tile; furniture lands on nobody, and not in anyone's way through a door.
+      const w = piece?.w ?? 1;
+      const people = Object.values(c.state.players).filter((o) => o.room === p.room);
+      // One drop per tile; furniture lands on nobody, and not in anyone's way.
       const taken = new Set<string>();
       for (const d of here) for (let i = 0; i < (pieceOfDrop(d)?.w ?? 1); i++) taken.add(`${d.x + i},${d.y}`);
       if (piece) {
-        for (const o of Object.values(c.state.players)) if (o.room === p.room) taken.add(`${o.x},${o.y}`);
-        for (const [ch, kind] of Object.entries(LEGEND)) {
-          if (!kind.portal) continue;
-          for (const [x, y] of map.find(ch))
-            for (const [dx, dy] of Object.values(DIRS)) taken.add(`${x + dx},${y + dy}`);
-        }
+        for (const o of people) taken.add(`${o.x},${o.y}`);
+        for (const t of noFurniture(p.room, map)) taken.add(t);
       }
       const games = p.room === "town" ? Object.values(c.state.games ?? {}).map((g) => g.spot) : [];
-      // Furniture: from the tile they face, so they choose where it goes.
+      // Furniture: from the tile they face, so they choose where it goes. `findSpot` centres a TV on it:
+      // facing right, that's one further, or it'd be over them.
       const [ax, ay] = piece ? DIRS[p.facing] : [0, 0];
-      const spot = findSpot(map, [p.x + ax, p.y + ay], piece?.w ?? 1, 1, games, taken);
+      const from: [number, number] = [p.x + ax + (ax > 0 ? Math.floor(w / 2) : 0), p.y + ay];
+      // Nor where it would leave anyone in the room no way out: the next spot over, then.
+      // ponytail: a route per person per spot tried; fine for a room, flood from the exit if it isn't.
+      const exit = map.find("x")[0];
+      const wallsIn = (at: { x: number; y: number }) => {
+        const next = withPieces([{ ch: piece!.ch, ...at }], map);
+        return people.some((o) => !route(next, [o.x, o.y], exit!));
+      };
+      let spot = findSpot(map, from, w, 1, games, taken);
+      while (spot && piece && exit && wallsIn(spot)) {
+        taken.add(`${spot.x},${spot.y}`);
+        spot = findSpot(map, from, w, 1, games, taken);
+      }
       if (!spot) return full;
       const drop: Drop = { id, item, room: p.room, ...spot, by, at: Date.now() };
       lay(c, drop);
@@ -703,6 +727,9 @@ export const world = actor({
 });
 
 // MARK: Helpers (plain functions over state, so the tick and the actions share them)
+
+/** Whether someone has an office: in a company, from `OFFICE_LEVEL`. */
+const hasOffice = (p: PlayerCore) => p.companyId !== null && p.level >= OFFICE_LEVEL;
 
 type Vars = {
   online: Map<number, number>;
@@ -798,12 +825,19 @@ function rest(s: WorldState, p: WorldPlayer, state: "away" | "working"): void {
   Object.assign(p, restSpot(room, state, taken), { state });
 }
 
-/** Whether `p` may go back to `to`: not a house they've left, not someone's closed office. */
+/**
+ * Whether `p` may go back to `to`: a tile you can stand or sit on (the map may have changed since), not
+ * a house they've left, not an office that's closed to them or gone.
+ */
 function canReturn(s: WorldState, p: WorldPlayer, to: Place): boolean {
+  const tile = mapOf(to.room).kind(to.x, to.y);
   const house = companyOfRoom(to.room);
   const owner = ownerOfOffice(to.room);
+  const o = owner === null ? undefined : s.players[owner];
   return (
-    (house === null || house === p.companyId) && (owner === null || owner === p.id || officeOf(s, owner).open)
+    (!!tile.walk || !!tile.seat) &&
+    (house === null || house === p.companyId) &&
+    (owner === null || (!!o && hasOffice(o) && (owner === p.id || officeOf(s, owner).open)))
   );
 }
 
@@ -820,11 +854,12 @@ function wake(s: WorldState, p: WorldPlayer): boolean {
     p.state = "idle";
     return true;
   }
-  // Someone took their seat meanwhile: stand up there instead.
+  // Someone took their seat meanwhile, or it's gone: stand up there instead.
   const taken = Object.values(s.players).some(
     (o) => o.id !== p.id && o.room === back.room && o.x === back.x && o.y === back.y,
   );
-  Object.assign(p, back, { state: back.state === "sit" && !taken ? "sit" : "idle" });
+  const seat = mapOf(back.room).kind(back.x, back.y).seat;
+  Object.assign(p, back, { state: back.state === "sit" && seat && !taken ? "sit" : "idle" });
   return true;
 }
 
@@ -1028,25 +1063,27 @@ async function snapshot(
   self: WorldPlayer,
   chat: Promise<ChatLine[]>,
 ): Promise<Snapshot> {
-  const owner = ownerOfOffice(self.room);
-  const companyId = companyOfRoom(self.room);
+  // Now: by the time the chat is read, they may be somewhere else.
+  const room = self.room;
+  const owner = ownerOfOffice(room);
+  const companyId = companyOfRoom(room);
   return {
-    room: self.room,
+    room,
     selfId: self.id,
     players: Object.values(s.players)
-      .filter((p) => p.room === self.room)
+      .filter((p) => p.room === room)
       .map((p) => view(p, online.has(p.id))),
     companies: Object.values(s.companies),
     occupancy: occupancy(s, online),
     chat: await chat,
-    houses: self.room === "town" ? houses(s) : {},
+    houses: room === "town" ? houses(s) : {},
     games: Object.values(s.games ?? {}),
     owner:
       owner === null
         ? null
         : { id: owner, name: s.players[owner]?.name ?? "Someone", open: officeOf(s, owner).open },
     doors: companyId === null ? [] : doorsOf(s, companyId),
-    drops: dropsIn(self.room),
+    drops: dropsIn(room),
   };
 }
 
@@ -1074,6 +1111,40 @@ function lift(c: Sender & { vars: Vars }, d: Drop): void {
       c.vars.dirty.add(p.id);
     }
   sendToRoom(c, d.room, "pickup", { id: d.id });
+}
+
+/**
+ * Where furniture can't go in `room`: in front of a door, and in a building, above its floor (the
+ * hallways, and the passage up to them, foot included), so it never blocks anyone's office door.
+ */
+function noFurniture(room: RoomId, map: GameMap): Set<string> {
+  const out = new Set<string>();
+  for (const [ch, kind] of Object.entries(LEGEND)) {
+    if (!kind.portal) continue;
+    for (const [x, y] of map.find(ch))
+      for (const [dx, dy] of Object.values(DIRS)) out.add(`${x + dx},${y + dy}`);
+  }
+  if (companyOfRoom(room) === null) return out;
+  out.add(`${PASSAGE_X},2`);
+  for (let y = map.y0; y < 2; y++) for (let x = map.x0; x < map.x0 + map.width; x++) out.add(`${x},${y}`);
+  return out;
+}
+
+/**
+ * After `room`'s map is rebuilt: drops it has no place for any more (on what's a wall or a door now, or
+ * furniture where `noFurniture` says) come off the floor. Returns their ids, for `town` to give back.
+ */
+function liftMisplaced(c: Sender & { vars: Vars }, room: RoomId): number[] {
+  const base = baseMap(room);
+  const reserved = noFurniture(room, base);
+  const out = dropsIn(room).filter((d) => {
+    const piece = pieceOfDrop(d);
+    for (let i = 0; i < (piece?.w ?? 1); i++)
+      if (!base.walkable(d.x + i, d.y) || (piece && reserved.has(`${d.x + i},${d.y}`))) return true;
+    return false;
+  });
+  for (const d of out) lift(c, d);
+  return out.map((d) => d.id);
 }
 
 /** Someone's office; one `town` has no row for yet is open. */
@@ -1123,15 +1194,21 @@ async function sendSnapshot(c: Sender & { vars: Vars; db: Sql }, p: WorldPlayer)
   }
 }
 
-/** Everyone in `room` gets it whole again: what's in it changed. */
+/** Everyone online in `room` gets it whole again: what's in it changed. */
 async function resend(c: Sender & { vars: Vars; db: Sql }, room: RoomId): Promise<void> {
-  for (const p of Object.values(c.state.players)) if (p.room === room) await sendSnapshot(c, p);
+  for (const p of Object.values(c.state.players))
+    if (p.room === room && c.vars.online.has(p.id)) await sendSnapshot(c, p);
 }
 
-/** A company's doors changed: rebuild its building, and everyone inside sees it. */
-async function rebuildHq(c: Sender & { vars: Vars; db: Sql }, companyId: number): Promise<void> {
+/**
+ * A company's doors changed: rebuild its building, and everyone inside sees it. Returns drops it has no
+ * place for any more, for `town` to give back.
+ */
+async function rebuildHq(c: Sender & { vars: Vars; db: Sql }, companyId: number): Promise<number[]> {
   buildHq(c.state, companyId, c.vars.dirty);
+  const lifted = liftMisplaced(c, `hq:${companyId}`);
   await resend(c, `hq:${companyId}`);
+  return lifted;
 }
 
 /** One tick: batched moves per room, and head counts when they change. */

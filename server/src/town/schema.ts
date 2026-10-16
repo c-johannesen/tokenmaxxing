@@ -1,5 +1,4 @@
-import type { Placed } from "@tokenmaxxing/core/office.ts";
-import { all, type Sql } from "../actors/shared.ts";
+import type { Sql } from "../actors/shared.ts";
 
 /** Every table `town` keeps. Also run by tests against an in-memory database. */
 export async function migrate(sql: Sql): Promise<void> {
@@ -51,23 +50,22 @@ export async function migrate(sql: Sql): Promise<void> {
     (await sql.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'items'")).length === 0;
   // One row per copy anyone holds. `owner_id` is NULL while it's on the floor: `dropped_by` and
   // `dropped_at` say whose and since when, `room`, `x` and `y` where (once `world` has put it down).
-  // `placed` is from before offices were furnished by dropping: always 0 now.
   await sql.execute(`CREATE TABLE IF NOT EXISTS items (
     id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER, item TEXT NOT NULL, at INTEGER NOT NULL,
-    placed INTEGER NOT NULL DEFAULT 0, dropped_by INTEGER, dropped_at INTEGER, room TEXT, x INTEGER, y INTEGER)`);
-  const itemColumns = (await sql.execute("PRAGMA table_info(items)")) as { name: string }[];
-  if (!itemColumns.some((c) => c.name === "room"))
-    for (const col of ["room TEXT", "x INTEGER", "y INTEGER"])
-      await sql.execute(`ALTER TABLE items ADD COLUMN ${col}`);
+    dropped_by INTEGER, dropped_at INTEGER, room TEXT, x INTEGER, y INTEGER)`);
   await sql.execute("CREATE INDEX IF NOT EXISTS items_owner ON items (owner_id, item)");
+  // Into the bag, once, when `items` is new: a purchase row was the item.
+  if (fresh) {
+    await sql.execute("INSERT INTO items (owner_id, item, at) SELECT user_id, item, at FROM purchases");
+    const [{ n }] = (await sql.execute("SELECT COUNT(*) AS n FROM items")) as [{ n: number }];
+    if (n > 0) console.log(`[town] ${n} items into the bag`);
+  }
   // Level rewards handed out, so each comes once.
   await sql.execute(`CREATE TABLE IF NOT EXISTS rewards (
     user_id INTEGER NOT NULL, item TEXT NOT NULL, PRIMARY KEY (user_id, item))`);
   // Coins that move between players: stakes and side bets held, then paid out or refunded, and
-  // trades (kind `trade`). Before `items`, a traded item also took its price back from the giver,
-  // whose purchase row went, and office furniture was paid for here (kind `furniture`, ref
-  // `office:<userId>`); those rows stay. Negative amounts leave a wallet. Every `ref` sums to 0 or
-  // less, never more, except `admin`: coins an admin gave or took (kind `admin`).
+  // trades (kind `trade`). Negative amounts leave a wallet. Every `ref` sums to 0 or less, never
+  // more, except `admin`: coins an admin gave or took (kind `admin`).
   await sql.execute(`CREATE TABLE IF NOT EXISTS ledger (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL, amount INTEGER NOT NULL, kind TEXT NOT NULL, ref TEXT NOT NULL,
@@ -80,49 +78,8 @@ export async function migrate(sql: Sql): Promise<void> {
     give TEXT NOT NULL, want TEXT NOT NULL, at INTEGER NOT NULL)`);
   await sql.execute("CREATE INDEX IF NOT EXISTS trades_to ON trades (to_id, at)");
   // Whether each office is open. A row is also "the desk and chair are given" (`starterDrops`).
-  // `furniture` is from before offices were furnished by dropping: always `[]` once migrated.
   await sql.execute(`CREATE TABLE IF NOT EXISTS offices (
-    user_id INTEGER PRIMARY KEY, furniture TEXT NOT NULL, open INTEGER NOT NULL DEFAULT 1,
-    updated_at INTEGER NOT NULL)`);
-  // Into the bag, once, when `items` is new: a purchase row was the item (a traded one already belonged
-  // to the receiver), and each office piece was paid for, so it's a placed row.
-  if (fresh) {
-    await sql.execute("INSERT INTO items (owner_id, item, at) SELECT user_id, item, at FROM purchases");
-    await sql.execute(
-      `INSERT INTO items (owner_id, item, at, placed)
-       SELECT user_id, 'furn.' || json_extract(p.value, '$.ch'), updated_at, 1 FROM offices, json_each(furniture) p`,
-    );
-    const [{ n }] = (await sql.execute("SELECT COUNT(*) AS n FROM items")) as [{ n: number }];
-    if (n > 0) console.log(`[town] ${n} items into the bag`);
-  }
-  // Offices furnished by dropping: each saved piece takes one of its owner's placed rows down onto
-  // the office floor where it stood. Once per office, since its JSON empties.
-  const saved = await all<{ userId: number; furniture: string; at: number }>(
-    sql,
-    "SELECT user_id AS userId, furniture, updated_at AS at FROM offices WHERE furniture <> '[]'",
-  );
-  let moved = 0;
-  for (const o of saved) {
-    for (const p of JSON.parse(o.furniture) as Placed[])
-      moved += (
-        await sql.execute(
-          `UPDATE items SET owner_id = NULL, dropped_by = ?, dropped_at = ?, room = ?, x = ?, y = ?, placed = 0
-           WHERE id = (SELECT id FROM items WHERE owner_id = ? AND item = ? AND placed = 1 LIMIT 1) RETURNING id`,
-          o.userId,
-          o.at,
-          `office:${o.userId}`,
-          p.x,
-          p.y,
-          o.userId,
-          `furn.${p.ch}`,
-        )
-      ).length;
-    await sql.execute("UPDATE offices SET furniture = '[]' WHERE user_id = ?", o.userId);
-  }
-  // More placed rows than pieces: the rest are in the bag.
-  const back = (await sql.execute("UPDATE items SET placed = 0 WHERE placed = 1 RETURNING id")).length;
-  if (saved.length + back > 0)
-    console.log(`[town] ${saved.length} offices: ${moved} pieces onto their floors, ${back} into the bag`);
+    user_id INTEGER PRIMARY KEY, open INTEGER NOT NULL DEFAULT 1)`);
   // One row per player per finished game (void games aren't recorded), for stats and the Games board.
   await sql.execute(`CREATE TABLE IF NOT EXISTS match_players (
     match_id INTEGER NOT NULL, user_id INTEGER NOT NULL, game TEXT NOT NULL, place INTEGER NOT NULL,

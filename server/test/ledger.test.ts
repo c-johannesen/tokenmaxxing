@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
 import { itemById } from "@tokenmaxxing/core/shop.ts";
 import type { TxSql } from "../src/actors/shared.ts";
 import {
@@ -154,7 +153,6 @@ const floor = () =>
 
 describe("the bag", () => {
   const sofa = itemById("furn.s")!;
-  const placedSofa = { ch: "s", x: 1, y: 1 };
 
   test("buying twice is two rows and one spend", async () => {
     await buy(sql, 1, itemById("glasses.1")!, NOW);
@@ -180,19 +178,26 @@ describe("the bag", () => {
     expect(await bag(sql, 2)).toEqual([]);
   });
 
-  test("the backfill turns purchases and office pieces into rows, once", async () => {
+  test("an office furnished before it had a row gets its desk and chair in the bag, not on its floor", async () => {
+    await sql.execute("INSERT INTO items (owner_id, item, at) VALUES (1, 'furn.s', 0)");
+    const sofaId = await takeOut(sql, 1, "furn.s", NOW);
+    await placed(sql, { id: sofaId, item: "furn.s", room: "office:1", x: 5, y: 3, by: 1, at: NOW });
+    expect(await grantRewards(sql, 1, 10, NOW)).toEqual([]);
+    expect(await bag(sql, 1)).toEqual([
+      { item: "furn.d", count: 1 },
+      { item: "furn.c", count: 1 },
+      { item: "hat.4", count: 1 },
+    ]);
+    expect(await floor()).toEqual([{ item: "furn.s", by: 1, room: "office:1", x: 5, y: 3 }]);
+  });
+
+  test("the backfill turns purchases into rows, once", async () => {
     // A database from before `items`.
     await sql.execute("DROP TABLE items");
     await sql.execute("INSERT INTO purchases VALUES (2, 'hat.1', 100, 5), (3, 'glasses.1', 0, 6)");
-    await sql.execute(
-      "INSERT INTO offices (user_id, furniture, updated_at) VALUES (2, ?, 7)",
-      JSON.stringify([...STARTER_OFFICE, placedSofa]),
-    );
     await migrate(sql);
     await migrate(sql);
-    // ...and the office pieces onto its floor (below).
     expect(await bag(sql, 2)).toEqual([{ item: "hat.1", count: 1 }]);
-    expect(await floor()).toHaveLength(3);
     expect(await bag(sql, 3)).toEqual([{ item: "glasses.1", count: 1 }]);
     expect(await balance(2)).toBe(75 - 100);
     // Every item gone (traded to someone deleted, say): the next start doesn't hand them out again.
@@ -200,28 +205,6 @@ describe("the bag", () => {
     await migrate(sql);
     expect(await bag(sql, 2)).toEqual([]);
     expect(await bag(sql, 3)).toEqual([]);
-  });
-
-  test("an office's saved pieces go onto its floor where they stood, once; spare placed rows into the bag", async () => {
-    for (const item of ["furn.d", "furn.c", "furn.s", "furn.s"])
-      await sql.execute("INSERT INTO items (owner_id, item, at, placed) VALUES (1, ?, 5, 1)", item);
-    await sql.execute(
-      "INSERT INTO offices (user_id, furniture, updated_at) VALUES (1, ?, 7)",
-      JSON.stringify([...STARTER_OFFICE, placedSofa]),
-    );
-    await migrate(sql);
-    await migrate(sql);
-    const own = { by: 1, room: "office:1" };
-    expect(await floor()).toEqual([
-      { item: "furn.d", ...own, x: 5, y: 3 },
-      { item: "furn.c", ...own, x: 5, y: 4 },
-      { item: "furn.s", ...own, x: 1, y: 1 },
-    ]);
-    expect(await sql.execute("SELECT DISTINCT dropped_at AS at FROM items WHERE owner_id IS NULL")).toEqual([
-      { at: 7 },
-    ]);
-    expect(await bag(sql, 1)).toEqual([{ item: "furn.s", count: 1 }]);
-    expect(await sql.execute("SELECT furniture FROM offices")).toEqual([{ furniture: "[]" }]);
   });
 });
 
@@ -236,9 +219,9 @@ describe("drops", () => {
     expect(await bag(sql, 1)).toEqual([]);
     expect(await unclaimed(sql, NOW - HOUR)).toEqual([old]);
     await giveBack(sql, [old]);
-    expect(await pickUp(sql, old, 2)).toBe(false);
+    expect(await pickUp(sql, old, 2, "inn")).toBe(false);
     expect(await bag(sql, 1)).toEqual([{ item: "glasses.1", count: 1 }]);
-    expect(await pickUp(sql, fresh, 2)).toBe(true);
+    expect(await pickUp(sql, fresh, 2, "inn")).toBe(true);
     expect(await bag(sql, 2)).toEqual([{ item: "glasses.1", count: 1 }]);
     expect(await unclaimed(sql, NOW)).toEqual([]);
   });
@@ -257,8 +240,12 @@ describe("drops", () => {
     expect(await unclaimed(sql, NOW - HOUR)).toEqual([gift]);
     for (let i = 0; i < 5; i++) await dropIn(1, "furn.=", "inn");
     await expect(dropIn(1, "furn.=", "inn")).rejects.toMatchObject({ code: "too_many" });
+    // Only from where it lies: a world that lost track of it (a ghost elsewhere) gets nothing.
+    expect(await pickUp(sql, gift, 1, "inn")).toBe(false);
+    // Nor for someone deleted meanwhile.
+    expect(await pickUp(sql, gift, 9, "office:1")).toBe(false);
     // Picked up, it's off the floor: back down, it's somewhere new.
-    expect(await pickUp(sql, gift, 1)).toBe(true);
+    expect(await pickUp(sql, gift, 1, "office:1")).toBe(true);
     expect(await sql.execute("SELECT room, x, y FROM items WHERE id = ?", gift)).toEqual([
       { room: null, x: null, y: null },
     ]);
@@ -342,19 +329,34 @@ describe("the admin page's balances", () => {
 describe("trades", () => {
   const specs = itemById("glasses.1")!; // Nerd specs, 60
   /** ada (125) offers bo (75), unless told otherwise. */
-  const trade = (t: Partial<Trade>): Trade => ({
-    fromId: 1,
-    from: "ada",
-    toId: 2,
-    to: "bo",
-    give: { coins: 0, items: [] },
-    want: { coins: 0, items: [] },
-    at: NOW,
-    ...t,
-  });
+  async function offer(t: Partial<Trade>): Promise<Trade> {
+    const out = {
+      fromId: 1,
+      from: "ada",
+      toId: 2,
+      to: "bo",
+      give: { coins: 0, items: [] },
+      want: { coins: 0, items: [] },
+      at: NOW,
+      ...t,
+    };
+    await sql.execute(
+      "INSERT OR REPLACE INTO trades (from_id, to_id, give, want, at) VALUES (?, ?, ?, ?, ?)",
+      out.fromId,
+      out.toId,
+      JSON.stringify(out.give),
+      JSON.stringify(out.want),
+      out.at,
+    );
+    return out;
+  }
 
   test("coins both ways net the difference, and the ref sums to 0", async () => {
-    await settleTrade(sql, trade({ give: { coins: 50, items: [] }, want: { coins: 20, items: [] } }), NOW);
+    await settleTrade(
+      sql,
+      await offer({ give: { coins: 50, items: [] }, want: { coins: 20, items: [] } }),
+      NOW,
+    );
     expect(await balance(1)).toBe(125 - 30);
     expect(await balance(2)).toBe(75 + 30);
     expect(await sumOf(`trade:1:${NOW}`)).toBe(0);
@@ -364,7 +366,7 @@ describe("trades", () => {
     await buy(sql, 1, specs, NOW);
     await buy(sql, 1, specs, NOW);
     await buy(sql, 2, specs, NOW);
-    await settleTrade(sql, trade({ give: { coins: 0, items: [specs.id] } }), NOW);
+    await settleTrade(sql, await offer({ give: { coins: 0, items: [specs.id] } }), NOW);
     expect([await balance(1), await balance(2)]).toEqual([5, 15]);
     expect((await bag(sql, 1))[0]!.count).toBe(1);
     expect((await bag(sql, 2))[0]!.count).toBe(2);
@@ -374,17 +376,29 @@ describe("trades", () => {
   test("a piece on the floor can't be traded until it's picked up", async () => {
     await buy(sql, 1, itemById("furn.s")!, NOW);
     const id = await takeOut(sql, 1, "furn.s", NOW);
-    const offer = trade({ give: { coins: 0, items: ["furn.s"] } });
-    await expect(settleTrade(sql, offer, NOW)).rejects.toMatchObject({ code: "not_owned" });
-    await pickUp(sql, id, 1);
-    await settleTrade(sql, offer, NOW);
+    const sofa = await offer({ give: { coins: 0, items: ["furn.s"] } });
+    await expect(settleTrade(sql, sofa, NOW)).rejects.toMatchObject({ code: "not_owned" });
+    await pickUp(sql, id, 1, "inn");
+    await settleTrade(sql, sofa, NOW);
     expect((await wallet(sql, 2, NOW)).owned).toEqual(["furn.s"]);
   });
 
-  test("the giver's coins dropped since the offer: too_poor, and nothing moves", async () => {
-    const offer = trade({ give: { coins: 100, items: [] } });
+  test("the giver's coins dropped since the offer: too_poor, without their balance, and nothing moves", async () => {
+    const hundred = await offer({ give: { coins: 100, items: [] } });
     await buy(sql, 1, specs, NOW); // 125 → 65
-    await expect(settleTrade(sql, offer, NOW)).rejects.toMatchObject({ code: "too_poor" });
+    await expect(settleTrade(sql, hundred, NOW)).rejects.toMatchObject({
+      code: "too_poor",
+      message: "ada can't cover 🪙 100 right now.",
+    });
     expect([await balance(1), await balance(2)]).toEqual([65, 75]);
+  });
+
+  test("an offer withdrawn or replaced meanwhile doesn't settle", async () => {
+    const fifty = await offer({ give: { coins: 50, items: [] } });
+    const one = await offer({ give: { coins: 1, items: [] }, at: NOW + 1 }); // replaces it
+    await expect(settleTrade(sql, fifty, NOW)).rejects.toMatchObject({ code: "not_found" });
+    await sql.execute("DELETE FROM trades"); // withdrawn
+    await expect(settleTrade(sql, one, NOW)).rejects.toMatchObject({ code: "not_found" });
+    expect([await balance(1), await balance(2)]).toEqual([125, 75]);
   });
 });
