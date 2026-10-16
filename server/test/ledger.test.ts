@@ -17,6 +17,15 @@ async function earn(userId: number, day: string, tokens: number) {
     tokens,
   );
 }
+/** An `activity_daily` row: `agents` at once on `day`, nothing else. */
+async function peak(userId: number, day: string, agents: number) {
+  await sql.execute(
+    "INSERT INTO activity_daily (user_id, day, prompts, prs, agent_buckets, active_buckets, peak_agents) VALUES (?, ?, 0, 0, 0, 0, ?)",
+    userId,
+    day,
+    agents,
+  );
+}
 const balance = async (userId: number) => (await wallet(sql, userId, NOW)).balance;
 const sumOf = async (ref: string) =>
   ((await sql.execute("SELECT SUM(amount) AS n FROM ledger WHERE ref = ?", ref)) as [{ n: number }])[0].n;
@@ -35,14 +44,14 @@ beforeEach(async () => {
   sql = memorySql().sql;
   await migrate(sql);
   for (const id of [1, 2, 3]) await signUpOn(id, "2025-12-31");
-  await earn(1, "2026-01-01", 10_000e6); // √10000 = 100, +25 first place = 125
-  await earn(2, "2026-01-02", 2_500e6); // 50, +25 = 75
+  await earn(1, "2026-01-01", 10_000e6); // √10000 = 100, +25 first place, +5 for 500M = 130
+  await earn(2, "2026-01-02", 2_500e6); // 50, +25, +5 = 80
   await earn(3, "2026-01-03", 100e6); // 10, +25 = 35
 });
 
 describe("the coin ledger", () => {
   test("a stake is held, then paid out, and the ref sums to 0", async () => {
-    expect(await balance(1)).toBe(125);
+    expect(await balance(1)).toBe(130);
     await hold(
       sql,
       "table:1",
@@ -54,8 +63,8 @@ describe("the coin ledger", () => {
       names,
       NOW,
     );
-    expect(await balance(1)).toBe(95);
-    expect(await balance(2)).toBe(45);
+    expect(await balance(1)).toBe(100);
+    expect(await balance(2)).toBe(50);
     expect(await heldIn(sql, "table:1")).toEqual(
       new Map([
         [1, 30],
@@ -63,8 +72,8 @@ describe("the coin ledger", () => {
       ]),
     );
     await pay(sql, "table:1", "payout", [{ userId: 2, amount: 60 }], NOW);
-    expect(await balance(1)).toBe(95);
-    expect(await balance(2)).toBe(105);
+    expect(await balance(1)).toBe(100);
+    expect(await balance(2)).toBe(110);
     expect(await sumOf("table:1")).toBe(0);
   });
 
@@ -82,7 +91,7 @@ describe("the coin ledger", () => {
         NOW,
       ),
     ).rejects.toThrow("cy can stake at most 🪙 17");
-    expect(await balance(1)).toBe(125); // nothing was taken from ada either
+    expect(await balance(1)).toBe(130); // nothing was taken from ada either
     // A side bet only has to fit the balance.
     await hold(sql, "bets:2", "bet", [{ userId: 3, amount: 35 }], names, NOW);
     expect(await balance(3)).toBe(0);
@@ -110,10 +119,10 @@ describe("the coin ledger", () => {
       NOW,
     );
     await refund(sql, "table:4", NOW, [2]);
-    expect(await balance(2)).toBe(75);
+    expect(await balance(2)).toBe(80);
     expect(await heldIn(sql, "table:4")).toEqual(new Map([[1, 40]]));
     await refund(sql, "table:4", NOW);
-    expect(await balance(1)).toBe(125);
+    expect(await balance(1)).toBe(130);
     expect(await sumOf("table:4")).toBe(0);
   });
 });
@@ -123,7 +132,8 @@ describe("the wallet", () => {
     for (const id of [4, 5, 6, 7]) await signUpOn(id, "2026-03-03");
     await Promise.all([4e9, 3e9, 2e9, 1e9].map((tokens, i) => earn(4 + i, "2026-03-03", tokens)));
     const wins = await Promise.all([4, 5, 6, 7].map((id) => wallet(sql, id, NOW)));
-    expect(wins.map((w) => w.balance)).toEqual([63 + 25, 54 + 15, 44 + 10, 31]);
+    // Each also burned 500M: +5.
+    expect(wins.map((w) => w.balance)).toEqual([63 + 25 + 5, 54 + 15 + 5, 44 + 10 + 5, 31 + 5]);
     // Only the last 30 days are listed, but old wins still count in the balance.
     expect(wins[0]!.wins).toEqual([]);
   });
@@ -140,11 +150,33 @@ describe("the wallet", () => {
   });
 });
 
+describe("daily quests", () => {
+  test("pay from the day you signed up, not before", async () => {
+    await peak(1, "2026-01-01", 5); // Run 5 agents at once
+    expect(await balance(1)).toBe(130 + 5);
+    await signUpOn(4, "2026-03-03");
+    await peak(4, "2026-03-02", 5);
+    expect(await balance(4)).toBe(0);
+  });
+
+  test("today's are done once the day's rollups pass", async () => {
+    await signUpOn(4, "2026-09-29");
+    expect((await wallet(sql, 4, NOW)).quests.map((q) => q.done)).toEqual([false, false, false, false]);
+    await earn(4, "2026-09-29", 500e6);
+    const w = await wallet(sql, 4, NOW);
+    expect(w.quests.filter((q) => q.done).map((q) => q.id)).toEqual(["tokens"]);
+    expect(w.balance).toBe(22 + 5); // √500, and no podium for a day that isn't over
+  });
+});
+
 describe("the admin page's balances", () => {
   test("add up to what each wallet says", async () => {
     for (const id of [4, 5]) await signUpOn(id, "2026-03-03");
     await Promise.all([4e9, 3e9].map((tokens, i) => earn(4 + i, "2026-03-03", tokens)));
     await earn(4, "2026-03-02", 1e12); // before signing up: pays nothing
+    await peak(4, "2026-03-03", 5);
+    await peak(5, "2026-03-02", 5); // before signing up
+    await peak(1, "2026-02-01", 5); // a day with no tokens
     await sql.execute("INSERT INTO purchases VALUES (5, 'hat.1', 20, 0)");
     await hold(sql, "table:1", "stake", [{ userId: 1, amount: 40 }], names, NOW);
     const all = await balances(sql, NOW);
@@ -152,7 +184,7 @@ describe("the admin page's balances", () => {
   });
 
   test("an admin sets a balance through the ledger", async () => {
-    expect(await setBalance(sql, 1, 500, NOW)).toEqual({ before: 125, balance: 500 });
+    expect(await setBalance(sql, 1, 500, NOW)).toEqual({ before: 130, balance: 500 });
     expect(await balance(1)).toBe(500);
     await setBalance(sql, 1, 3, NOW);
     expect(await balance(1)).toBe(3);

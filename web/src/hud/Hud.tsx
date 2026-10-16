@@ -49,6 +49,7 @@ export function Hud() {
       )}
       <MentionToast />
       <NoticeToast />
+      <QuestToast />
       <InviteToast />
       <LevelToast />
       <FirstVisit />
@@ -294,6 +295,37 @@ function MentionToast() {
       onClick={() => hud.set({ mention: null, panel: { kind: "card", userId: line.userId } })}
     >
       💬 <strong>{line.name}</strong> mentioned you in {roomName(line.room)}: {line.text}
+    </button>
+  );
+}
+
+/**
+ * Quests the last wallet has done that the one before didn't. The first wallet after load
+ * is the baseline, so a reload doesn't toast what's already done.
+ */
+function QuestToast() {
+  const quests = useHud((s) => s.wallet?.quests);
+  const seen = useRef<Set<string> | null>(null);
+  const [fresh, setFresh] = useState<{ quests: NonNullable<typeof quests>; at: number } | null>(null);
+  useEffect(() => {
+    if (!quests) return;
+    const done = quests.filter((q) => q.done);
+    const before = seen.current;
+    seen.current = new Set(done.map((q) => q.id));
+    const now = before ? done.filter((q) => !before.has(q.id)) : [];
+    if (now.length > 0) setFresh({ quests: now, at: Date.now() });
+  }, [quests]);
+  if (!useFresh(fresh?.at, MENTION_MS) || !fresh) return null;
+  return (
+    <button
+      type="button"
+      className="toast mention-toast"
+      onClick={() => {
+        setFresh(null);
+        hud.set({ panel: { kind: "shop" } });
+      }}
+    >
+      {fresh.quests.map((q) => `✓ ${q.text} · 🪙 ${q.coins}`).join("  ")}
     </button>
   );
 }
