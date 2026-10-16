@@ -8,14 +8,16 @@ the floor for someone else to take; rewards show in the bag but never leave you.
 Decided:
 - **Rewards are not tradeable** and not droppable (a drop is a trade with extra steps). They show in the
   bag with a 🏅 mark and can be worn; nothing else.
-- **You take only what you stand on.** Stepping onto a drop does nothing by itself; G (or a click) takes it.
+- **You take what you're on**, or, for a piece nobody can be on, what you face from the next tile.
+  Stepping onto a drop does nothing by itself; G (or a click) takes it.
 - **Furniture is tradeable.** Furniture placed in your office is yours: nobody else can take it.
 - **Your office floor is yours too.** Anything dropped in your own office can be taken only by you.
 
-"On it" means occupying its tile: standing on a parcel or a rug, or **sitting on a dropped seat**. So a
-dropped sofa, chair, bench or bed is real furniture where it lies, anyone sits on it, and whoever is
-sitting on it can take it (they stand up holding it). Pieces nobody can be on (desk, shelf, lamp, plant,
-coffee machine, TV) drop as parcels, like clothes and pets, or they could never be taken.
+"On it" means occupying its tile: standing on a parcel or a rug, or **sitting on a dropped seat**. So
+every dropped piece of furniture is real furniture where it lies: anyone sits on a dropped sofa, anyone
+pours from a dropped coffee machine. Whoever is sitting on a seat can take it (they stand up holding it);
+a piece nobody can be on (desk, shelf, lamp, plant, coffee machine, TV) is taken by facing it from an
+adjacent tile. Only wearables and pets lie as parcels.
 
 Difficulty, overall: **4 / 5.** Two PRs. The first (inventory, grants, trading from the bag, furniture
 into the bag) is medium: one new table with a backfill, every ownership check moved over, and the office
@@ -67,16 +69,17 @@ Sources: [Pokémon items](https://breezewiki.discard.no/pokemon/wiki/Item),
 - **Furniture** lives in the bag. Your office lists what's placed; placing takes a row out of the bag
   (`placed = 1`), removing puts it back. Placing is free; buying costs. "Removing refunds nothing" becomes
   "removing keeps the piece". Only the owner edits an office, so placed furniture can't be taken.
-- **Dropping** puts one row on the floor of the room you're in. **Seats and rugs** (`b`, `c`, `s`, `B`,
-  `=`) go into the room's map as themselves on the nearest free floor tile, and work like any furniture:
-  people sit on them. **Everything else** (clothes, hats, glasses, pets, and furniture nobody can be on:
-  desk, shelf, lamp, plant, coffee machine, TV) lies as a parcel on your tile (or the nearest free one),
-  never blocking, never usable. One drop per tile. A worn thing dropped comes off your look.
-- **Taking:** be on it and press **G**: standing on a parcel or a rug, or sitting on a dropped seat (you
-  stand up with it). Or click it: you walk onto the parcel, or sit on the seat, and take. The server
-  checks you occupy the tile. Anyone can take a drop in town, the Inn or a company building. In an
-  office, only its owner can: a visitor's drop there becomes the owner's to take, or goes back to the
-  visitor after an hour like any unclaimed drop. Placed office furniture is never a drop.
+- **Dropping** puts one row on the floor of the room you're in. **Furniture** goes into the room's map
+  as itself on the nearest free floor tile, and works like any furniture: seats seat, the coffee machine
+  pours, the rest blocks. **Wearables and pets** lie as a parcel on your tile (or the nearest free one),
+  never blocking. One drop per tile. A worn thing dropped comes off your look.
+- **Taking:** press **G** on it: standing on a parcel or a rug, or sitting on a dropped seat (you stand
+  up with it). For a piece nobody can be on (desk, shelf, lamp, plant, coffee machine, TV): stand next to
+  it, face it, press G. Or click it: you walk onto a parcel, sit on a seat, or walk up to a blocking
+  piece, and take. The server checks you occupy the tile, or face it from the next tile for a blocking
+  piece. Anyone can take a drop in town, the Inn or a company building. In an office, only its owner
+  can: a visitor's drop there becomes the owner's to take, or goes back to the visitor after an hour
+  like any unclaimed drop. Placed office furniture is never a drop.
 - Unclaimed drops go back to the dropper after an hour. At most 5 live drops per person and 30 per room.
   Dropping in a room that's full, or on a tile that already has a parcel, says so.
 
@@ -130,19 +133,20 @@ World state (`server/src/actors/world.ts`): `drops?: Record<string, Drop>` with
   rewards (`not_tradeable`) and a sixth live drop (`SELECT COUNT(*) … WHERE dropped_by = ? AND owner_id IS
   NULL`); set `owner_id = NULL, dropped_by = me, dropped_at = now`; un-wear if worn; then
   `world.placeDrop({ id, item, by })`. A parcel goes on my tile, or the nearest free walkable one if I'm
-  seated or mine has a drop; a seat or rug goes on the nearest free floor tile that isn't a doorway or the
+  seated or mine has a drop; furniture goes on the nearest free floor tile that isn't a doorway or the
   tile in front of one (the same no-reachability-check `ponytail` as offices). Past 30 in the room it
   refuses with a notice, and the town returns the row at once.
-- `world.take()`: the drop on my tile, or nothing: standing on a parcel or rug, or `state === "sit"` on a
-  dropped seat. In an `office:<owner>` room, only the owner (`"That's ada's floor."` otherwise). Remove
-  it from state, stand me up if I was sitting on it, send `pickup` to the room, call
+- `world.take()`: the drop on my tile (standing on a parcel or rug, or `state === "sit"` on a dropped
+  seat), else the drop on the tile I face if it's a piece that can't be occupied; else nothing. In an
+  `office:<owner>` room, only the owner (`"That's ada's floor."` otherwise). Remove it from state, stand
+  me up if I was sitting on it, send `pickup` to the room, call
   `town.pickUp(dropId, userId)`: `UPDATE items SET owner_id = ?, dropped_by = NULL WHERE id = ? AND
   owner_id IS NULL`. Zero rows updated means the sweeper got there first; the drop is already gone from
   the world. Returns a `StepResult` notice: `🎒 Took a Sofa.`
-- **Dropped seats and rugs in the map:** `core` gets `DROPS = new Map<RoomId, Drop[]>()` and
-  `setDrops(room, drops)`; `mapOf(room)` overlays the seat and rug drops (their `ch`) on the base map and
-  caches per room until `setDrops` runs again. `stepTarget` and `sit` then just work. Parcels aren't in
-  the map. Both the world and the client call `setDrops` from the snapshot and the `drop`/`pickup`
+- **Dropped furniture in the map:** `core` gets `DROPS = new Map<RoomId, Drop[]>()` and
+  `setDrops(room, drops)`; `mapOf(room)` overlays the furniture drops (their `ch`) on the base map and
+  caches per room until `setDrops` runs again. `stepTarget`, `sit` and `drink` then just work. Parcels
+  aren't in the map. Both the world and the client call `setDrops` from the snapshot and the `drop`/`pickup`
   events; the sweeper's `removeDrops` does too. A player sitting on a seat the sweeper removes is stood
   up in place.
 - **Sweeper:** a town alarm every 10 minutes (`c.schedule`, as `arcade` uses) returns rows with
@@ -160,12 +164,13 @@ World state (`server/src/actors/world.ts`): `drops?: Record<string, Drop>` with
   longer charges; Remove returns to the bag. The "Not enough coins" line goes; "None left in your bag"
   takes its place when relevant.
 - **Trade panel:** "You give" lists bag kinds with counts, rewards and placed pieces excluded.
-- **Drops in the world** (`web/src/game/render.ts`): seats and rugs draw themselves from the map; the
-  rest is one parcel sprite (a small box with a bow, drawn in `web/src/art/objects.ts`), with the pet's
+- **Drops in the world** (`web/src/game/render.ts`): furniture draws itself from the map; wearables and
+  pets are one parcel sprite (a small box with a bow, drawn in `web/src/art/objects.ts`), with the pet's
   frame instead for pets. A `sign` with the kind's name shows when you're on it or next to it. `G` calls
-  `conn.take()`; clicking a drop walks you onto it, or sits you on it for a seat (`walkTo` with a
-  `takeOnArrival` flag next to `interactOnArrival` in `web/src/game/input.ts`), and takes. In someone
-  else's office the sign reads `🔒 Sofa` and G says whose floor it is. The ⓘ Controls overlay lists G.
+  `conn.take()`; clicking a drop walks you onto a parcel, sits you on a seat, or walks you up to a
+  blocking piece (`walkTo` with a `takeOnArrival` flag next to `interactOnArrival` in
+  `web/src/game/input.ts`), and takes. In someone else's office the sign reads `🔒 Sofa` and G says
+  whose floor it is. The ⓘ Controls overlay lists G.
 
 ## Tests
 
@@ -178,11 +183,12 @@ World state (`server/src/actors/world.ts`): `drops?: Record<string, Drop>` with
 - `server/test/world.test.ts`: a drop appears in the room snapshot; `take` from the next tile is refused;
   a colleague standing on it takes it and the dropper's bag loses it; the drop is gone for everyone; a
   second take of the same id fails cleanly; a dropped sofa is in the room's map, a colleague sits on it,
-  takes it while seated and is standing afterwards; a dropped desk is a parcel; a visitor can't take a
+  takes it while seated and is standing afterwards; a dropped desk blocks, is taken from the next tile
+  while facing it and not from two tiles away or from on top of a parcel elsewhere; a visitor can't take a
   drop in the owner's office and the owner can; a room at 30 drops refuses the 31st; a second drop on
   the same tile lands next to it.
-- `core/test`: `mapOf` with seat drops overlays and caches, and leaves parcels out; `isTradeable` is
-  false for rewards; `parseSide` refuses them.
+- `core/test`: `mapOf` with furniture drops overlays and caches, and leaves parcels out; `isTradeable`
+  is false for rewards; `parseSide` refuses them.
 
 ## Difficulty
 
@@ -193,7 +199,7 @@ World state (`server/src/actors/world.ts`): `drops?: Record<string, Drop>` with
 | Trading from the bag | S | 2 | Simplifies `settleTrade`; removes the ledger trick |
 | Furniture into the bag, editor rework | M | 3 | `furnish` and the editor change meaning; a Shop tab |
 | Bag panel, Shop counts | S–M | 2 | New panel from existing pieces |
-| Drops, taking, dropped seats in maps, sweeper | L | 4 | Two-actor handoff; seats change room maps live for everyone; caps and expiry; a sprite and a key |
+| Drops, taking, dropped furniture in maps, sweeper | L | 4 | Two-actor handoff; furniture changes room maps live for everyone; caps and expiry; a sprite and a key |
 
 PR 1 (first five rows) is bigger than the trading feature was. PR 2 (drops) is bigger than offices.
 Together, 4 / 5.
