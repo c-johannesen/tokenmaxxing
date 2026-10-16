@@ -152,10 +152,9 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 
 **`town["main"]`**: everything cold, joined in SQL.
 - Tables: `users`, `companies` (ids never reused), `usage_daily`, `activity_daily`, `capped_daily`,
-  `purchases`, `ledger` (coins held and paid by games, and traded), `trades` (one open offer per sender),
-  `match_players` (one row per player per finished game), `deleted_users`, `admin_log`.
-  `purchases`, `ledger` (coins held and paid by games, and paid for furniture), `offices`, `match_players`
-  (one row per player per finished game), `deleted_users`, `admin_log`.
+  `purchases`, `ledger` (coins held and paid by games, traded, and paid for furniture), `trades` (one open
+  offer per sender), `offices`, `match_players` (one row per player per finished game), `deleted_users`,
+  `admin_log`.
 - Accounts: `signUp` (20 an hour per IP, 1,000 an hour in all), `rename`, `setLook` (refuses shop items you don't own), `me`.
 - Companies: create (on a plot the owner picks: any empty block next to the town, see `frontier` in
   `core/src/maps.ts`), leave, kick, rename, `setWebsite`. One company per person, at most 50 members. The
