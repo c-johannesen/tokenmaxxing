@@ -152,10 +152,10 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 
 **`town["main"]`**: everything cold, joined in SQL.
 - Tables: `users`, `companies` (ids never reused), `usage_daily`, `activity_daily`, `capped_daily`,
-  `purchases`, `ledger` (coins held and paid by games, traded, and paid for furniture), `trades` (one open
-  offer per sender), `offices`, `match_players` (one row per player per finished game), `deleted_users`,
-  `admin_log`.
-- Accounts: `signUp` (20 an hour per IP, 1,000 an hour in all), `rename`, `setLook` (refuses shop items you don't own), `me`.
+  `purchases` (coins spent, per kind), `items` (one row per copy anyone holds), `rewards` (level rewards
+  handed out), `ledger` (coins held and paid by games, and traded), `trades` (one open offer per sender),
+  `offices`, `match_players` (one row per player per finished game), `deleted_users`, `admin_log`.
+- Accounts: `signUp` (20 an hour per IP, 1,000 an hour in all), `rename`, `setLook` (refuses items you don't hold), `me`.
 - Companies: create (on a plot the owner picks: any empty block next to the town, see `frontier` in
   `core/src/maps.ts`), leave, kick, rename, `setWebsite`. One company per person, at most 50 members. The
   earliest joiner takes over from a leaving owner; the last one out closes the company. The town is built from
@@ -166,15 +166,15 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   event, shown as a toast). A new player's first visit opens this choice.
 - Stats: `leaderboard`, `profile`, `today` (the HUD's corner), `searchNames`, `gameBoard`. Cost is priced
   when read.
-- Coins: `wallet`, `buy`; for `arcade`: `hold`, `pay`, `refund`, `recordMatch`. Games: `gameBoard`.
+- Coins: `wallet`, `buy`, `bag`; for `arcade`: `hold`, `pay`, `refund`, `recordMatch`. Games: `gameBoard`.
 - Trades: `offerTrade` (10 an hour; a new offer replaces your old one), `trades`, `acceptTrade`,
   `declineTrade`, `withdrawTrade`. See *Coins and the shop*.
-- Offices: `office`, `setOffice` (pays for every piece there's more of), `setOfficeOpen`.
+- Offices: `office`, `setOffice` (places pieces from the bag), `setOfficeOpen`.
 - Admin (`town/admin.ts`, for `/admin`): `adminOverview`, `adminUsers` and `adminCompanies`; rename people
   and companies; set a balance (the difference goes in the `ledger` as kind and ref `admin`); take someone
   out of their company; close a company; wipe someone's usage (their `player` drops its raw events too:
   `wipe`); delete an account. Every change goes in `admin_log`, shown on the page's Log tab. Deleting drops their usage, activity,
-  purchases, application and trade offers, hands over or closes their company, takes them out of `world`
+  purchases, items, rewards, application and trade offers, hands over or closes their company, takes them out of `world`
   (`removePlayer`) and destroys their `player` (`close`), so every token and session stops working. It's
   refused while they have coins in an unsettled game. Their `ledger` and `match_players` rows stay, and
   `deleted_users` keeps new ids above theirs, so nobody inherits them.
@@ -215,19 +215,26 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 - Balances aren't stored: they're worked out from `usage_daily` minus `purchases`, so a late sync still pays.
 - Four daily quests (`core/src/quests.ts`) pay up to 14 more a day: 500M tokens, 5 agents at once, 2 hours of
   agents running, 2 PRs. They're worked out from `usage_daily` and `activity_daily` too, so nothing is stored.
-- The catalogue (`core/src/shop.ts`): 4 outfits, 3 glasses, 3 hats and 5 pets, 60 to 1,500 coins. Items are
-  worn through `Look` (`outfit` ≥ 8, `glasses`, `hat`, `pet`). Pets follow their owner in the client.
-- Three items are earned, not bought: a top hat, server-rack armour and a Singularity orb, owned from levels 10,
-  20 and 30. Like balances, that's worked out from usage (lifetime tokens), so there's nothing to claim.
-- **Trades** (from a player card): up to 🪙 500 and 4 sold items each way, for 7 days. Accepting re-checks
-  both sides under `serial` and moves everything in one transaction (`settleTrade`): coins through the
-  `ledger` (kind `trade`), items by moving the `purchases` row to the receiver at price 0, with a ledger row
-  of minus the price for the giver so their balance stays put. An item that leaves you comes off your look.
+- The catalogue (`core/src/shop.ts`): 4 outfits, 3 glasses, 3 hats, 5 pets and the 11 pieces of furniture
+  (`furn.<ch>`), 10 to 1,500 coins. Items are worn through `Look` (`outfit` ≥ 8, `glasses`, `hat`, `pet`).
+  Pets follow their owner in the client.
+- **The bag** (`items`, the 🎒 panel): one row per copy, so you can hold two Ducks; you can wear a kind if you
+  hold one. Buying adds a row and adds the price to `purchases` (spend only, one row per kind); buying a
+  kind you hold already is fine. `bag()` counts each kind and how many of it are in your office.
+- Three items are earned, not bought: a top hat, server-rack armour and a Singularity orb, at levels 10, 20
+  and 30. `report` hands them out as rows the first time a sync reaches the level (`grantRewards`, once each,
+  recorded in `rewards`), with the office's desk and chair at level 10. Rewards are `tradeable: false`.
+- **Trades** (from a player card): up to 🪙 500 and 4 items each way, for 7 days; not rewards, and not
+  furniture that's in your office. Accepting re-checks both sides under `serial` and moves everything in one
+  transaction (`settleTrade`): coins through the `ledger` (kind `trade`), items by moving one row of each kind
+  to the receiver. Spend stays in `purchases`, so balances don't change. A kind you no longer hold comes off
+  your look.
 - **Offices.** From level 10, every company member has one behind a door with their name on it in the
   company building (`office:<userId>`, one map template plus their furniture). The doors are in hallways of
   10 above the building's floor (negative `y`, `hqMap`), which `world` rebuilds when a door comes or goes.
-  Furniture is the map legend's own pieces, 10 to 120 coins; placing costs, moving is free, removing refunds
-  nothing. Anyone in the building walks into an open office; from outside, from the owner's card.
+  Furniture is the map legend's own pieces, bought into the bag; placing one sets its row's `placed`, removing
+  it puts it back in the bag, and none of it costs. Only the owner edits an office, so placed furniture can't
+  be traded away. Anyone in the building walks into an open office; from outside, from the owner's card.
 
 ## Games
 

@@ -12,7 +12,7 @@ export interface Piece {
   w?: number;
 }
 
-/** What an office can hold: furniture from the map legend, drawn as it is everywhere else. */
+/** What an office can hold: furniture from the map legend, drawn as it is everywhere else. Sold as `furn.<ch>`. */
 export const FURNITURE: readonly Piece[] = [
   { ch: "=", name: "Rug", price: 10 },
   { ch: "p", name: "Plant", price: 20 },
@@ -44,15 +44,6 @@ export const STARTER_OFFICE: readonly Placed[] = [
   { ch: "d", x: 5, y: 3 },
   { ch: "c", x: 5, y: 4 },
 ];
-
-/**
- * Coins to go from `before` to `after`: the price of each piece there's more of. ponytail: no refund
- * on removal and no inventory; add "pick up into inventory" if people ask.
- */
-export function officeCost(before: readonly Placed[], after: readonly Placed[]): number {
-  const count = (list: readonly Placed[], ch: string) => list.filter((p) => p.ch === ch).length;
-  return FURNITURE.reduce((n, f) => n + Math.max(0, count(after, f.ch) - count(before, f.ch)) * f.price, 0);
-}
 
 /**
  * Null unless every piece is a known char on a floor tile, nothing overlaps, and it's under OFFICE_PIECES.

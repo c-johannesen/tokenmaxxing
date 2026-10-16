@@ -1,5 +1,5 @@
 import { frontier } from "@tokenmaxxing/core/maps.ts";
-import { OFFICE_LEVEL, parseOffice, STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
+import { OFFICE_LEVEL, parseOffice } from "@tokenmaxxing/core/office.ts";
 import { isRangeKey } from "@tokenmaxxing/core/range.ts";
 import {
   emptySide,
@@ -41,23 +41,26 @@ import {
   today,
 } from "../town/boards.ts";
 import {
+  type BagRow,
+  bag,
   buy,
   checkTrade,
   type Entry,
   furnish,
+  grantRewards,
   type HoldKind,
   heldIn,
   hold,
   type Office,
   officeOf,
   offices,
-  ownedIds,
   ownedItems,
   type PayKind,
   pay,
   refund,
   setBalance,
   settleTrade,
+  starterOffice,
   type Trade,
   tradesWhere,
   type Wallet,
@@ -122,7 +125,7 @@ export type {
   Profile,
   Today,
 } from "../town/boards.ts";
-export type { Office, Trade, Wallet } from "../town/coins.ts";
+export type { BagRow, Office, Trade, Wallet } from "../town/coins.ts";
 export type { Listing, MyCompany } from "../town/companies.ts";
 export type { GamePlayer, GameStats } from "../town/games.ts";
 export type { PlayerCore } from "../town/users.ts";
@@ -269,7 +272,7 @@ export const town = actor({
       const userId = requireUser(c.conn.state);
       const look = parseLook(rawLook);
       if (!look) throw new UserError("Unknown look.", { code: "invalid_look" });
-      const owned = new Set(await ownedIds(c.db, userId));
+      const owned = new Set(await ownedItems(c.db, userId));
       if (itemsIn(look).some((i) => !owned.has(i.id)))
         throw new UserError("Buy it in the shop first.", { code: "not_owned" });
       await c.db.execute("UPDATE users SET look = ? WHERE id = ?", JSON.stringify(look), userId);
@@ -411,6 +414,9 @@ export const town = actor({
 
     wallet: (c): Promise<Wallet> => wallet(c.db, requireUser(c.conn.state), Date.now()),
 
+    /** What I hold, per kind, for the bag panel. */
+    bag: (c): Promise<BagRow[]> => bag(c.db, requireUser(c.conn.state)),
+
     buy: async (c, itemId: unknown): Promise<Wallet> => {
       const userId = requireUser(c.conn.state);
       const item = itemById(itemId);
@@ -512,8 +518,8 @@ export const town = actor({
       return { ...(await officeOf(c.db, u.id)), level: await levelOf(c.db, u.id), companyId: u.companyId };
     },
 
-    /** Saves my office's furniture, paying for every piece that's new. */
-    setOffice: async (c, raw: unknown): Promise<Wallet> => {
+    /** Saves my office's furniture, from my bag. */
+    setOffice: async (c, raw: unknown): Promise<void> => {
       const userId = requireUser(c.conn.state);
       if ((await levelOf(c.db, userId)) < OFFICE_LEVEL)
         throw new UserError(`Your own office opens at level ${OFFICE_LEVEL}.`, { code: "too_low" });
@@ -523,27 +529,20 @@ export const town = actor({
         });
       const furniture = parseOffice(raw);
       if (!furniture) throw new UserError("That doesn't fit in the office.", { code: "invalid_office" });
-      const w = await c.vars.serial(() => furnish(c.db, userId, furniture, Date.now()));
+      await c.vars.serial(() => furnish(c.db, userId, furniture, Date.now()));
       await pushOffice(c.db, c.client<typeof registry>(), userId);
-      return w;
     },
 
     /** Open: anyone can visit from my player card. Closed: only I get in, through the door. */
     setOfficeOpen: async (c, open: unknown): Promise<void> => {
       const userId = requireUser(c.conn.state);
       if (typeof open !== "boolean") throw new UserError("Open or closed?", { code: "invalid_office" });
-      await c.db.execute(
-        `INSERT INTO offices (user_id, furniture, open, updated_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET open = excluded.open, updated_at = excluded.updated_at`,
-        userId,
-        JSON.stringify(STARTER_OFFICE),
-        open ? 1 : 0,
-        Date.now(),
-      );
+      await starterOffice(c.db, userId, Date.now());
+      await c.db.execute("UPDATE offices SET open = ? WHERE user_id = ?", open ? 1 : 0, userId);
       await pushOffice(c.db, c.client<typeof registry>(), userId);
     },
 
-    /** From `player` after an ingest: replaces those days' rollups. */
+    /** From `player` after an ingest: replaces those days' rollups and hands out level rewards reached. */
     report: async (
       c,
       userId: number,
@@ -591,6 +590,7 @@ export const town = actor({
               "INSERT INTO capped_daily VALUES",
               activity.filter((a) => a.capped > 0).map((a) => [userId, a.day, a.capped]),
             );
+            await grantRewards(tx, userId, await levelOf(tx, userId), Date.now());
           },
           { name: "report-usage" },
         ),

@@ -13,6 +13,8 @@ const sideText = (s: Side): string =>
 /** Offering someone a trade, from their card: coins and items each way. */
 export function TradePanel({ userId }: { userId: number }) {
   const wallet = useHud((s) => s.wallet);
+  /** What I could give: my bag, less rewards and what's in my office. */
+  const [mine, setMine] = useState<Record<string, number> | null>(null);
   const [them, setThem] = useState<{ name: string; owned: string[] } | null>(null);
   const [give, setGive] = useState<Side>({ coins: 0, items: [] });
   const [want, setWant] = useState<Side>({ coins: 0, items: [] });
@@ -21,10 +23,21 @@ export function TradePanel({ userId }: { userId: number }) {
   const { error, busy, run } = useRun();
   useEffect(() => {
     void town.wallet().then((w) => hud.set({ wallet: w }));
+    void town
+      .bag()
+      .then((b) =>
+        setMine(
+          Object.fromEntries(
+            b
+              .filter((r) => isTradeable(r.item) && r.count > r.placed)
+              .map((r) => [r.item, r.count - r.placed]),
+          ),
+        ),
+      );
     void town.tradeables(userId).then(setThem, (e) => setFailed(errorText(e)));
   }, [userId]);
   if (failed) return <Modal title="🔁 Trade">{failed}</Modal>;
-  if (!wallet || !them) return <Modal title="🔁 Trade">Loading…</Modal>;
+  if (!wallet || !mine || !them) return <Modal title="🔁 Trade">Loading…</Modal>;
 
   const offer = run(async () => {
     setSent(false);
@@ -41,7 +54,8 @@ export function TradePanel({ userId }: { userId: number }) {
           <SideFields
             legend="You give"
             side={give}
-            items={wallet.owned.filter(isTradeable)}
+            items={Object.keys(mine)}
+            counts={mine}
             onChange={setGive}
           />
           <SideFields legend="You get" side={want} items={them.owned} onChange={setWant} />
@@ -60,16 +74,18 @@ export function TradePanel({ userId }: { userId: number }) {
   );
 }
 
-/** One side of an offer: a coins box and the items to pick from. */
+/** One side of an offer: a coins box and the items to pick from (with how many, when known). */
 function SideFields({
   legend,
   side,
   items,
+  counts,
   onChange,
 }: {
   legend: string;
   side: Side;
   items: string[];
+  counts?: Record<string, number>;
   onChange: (s: Side) => void;
 }) {
   const toggle = (id: string) =>
@@ -102,11 +118,12 @@ function SideFields({
           {items.map((id) => (
             <button key={id} type="button" aria-pressed={side.items.includes(id)} onClick={() => toggle(id)}>
               {itemById(id)?.name ?? id}
+              {counts && ` ×${counts[id]}`}
             </button>
           ))}
         </div>
       ) : (
-        <small className="muted">No shop items to trade.</small>
+        <small className="muted">No items to trade.</small>
       )}
     </fieldset>
   );

@@ -220,3 +220,23 @@ Together, 4 / 5.
 - The Inn: same 30-drop cap as any room, or lower, since everyone passes through? Default: the same.
 - Should a visitor be allowed to drop in someone else's office at all, given only the owner can take it
   there? It's how you leave a gift on someone's floor, so default: yes.
+
+## As built, PR 1
+
+- **A new office's desk and chair.** The backfill only sees saved offices, and a never-saved one reads as
+  `STARTER_OFFICE` with no rows behind it, so it couldn't be saved from the bag. `starterOffice` gives it its
+  `offices` row and the desk and chair as placed rows, free as they always were: from `grantRewards` at level
+  10, and from `furnish` and `setOfficeOpen` for anyone who hasn't synced since.
+- `grantRewards(sql, userId, level, now)` runs inside `report`'s transaction.
+- `ownedItems` and `wallet().owned` are the kinds you hold out of your office, one each: `setLook`, trades,
+  `tradeables` and the Shop's Wear buttons all read that one list.
+- `setOffice` returns nothing (no coins move); `furnish` runs in one transaction.
+- A trade takes a worn kind off the giver's look only when their last one goes.
+- The Shop wears only the first one you buy, and shows Wear / Take off next to the price for kinds you hold.
+- The office editor's pills read `Sofa ×2` (what's left in the bag after what's laid out), not "×2 in bag".
+- `deleteUser` deletes the account's rows by `owner_id`; live drops are PR 2's.
+- The admin page's Items column counts `items`, not purchases.
+- Old `ledger` rows of kind `trade` and `furniture` stay, and `deleteUser` still ignores them.
+- The backfill logs `[town] N items into the bag` the one time it runs.
+- Someone still wearing a level reward from before this lands can't `setLook` it again until their next sync
+  grants it (every 2 minutes from the app).

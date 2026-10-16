@@ -41,14 +41,24 @@ export async function migrate(sql: Sql): Promise<void> {
   await sql.execute(`CREATE TABLE IF NOT EXISTS applications (
     user_id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL, at INTEGER NOT NULL)`);
   await sql.execute("CREATE INDEX IF NOT EXISTS applications_company ON applications (company_id, at)");
+  // Coins spent in the shop, per kind: a rebuy adds its price. What you hold is in `items`.
   await sql.execute(`CREATE TABLE IF NOT EXISTS purchases (
     user_id INTEGER NOT NULL, item TEXT NOT NULL, price INTEGER NOT NULL, at INTEGER NOT NULL,
     PRIMARY KEY (user_id, item)) WITHOUT ROWID`);
+  // One row per copy anyone holds. `owner_id` is NULL while it's on the floor (`dropped_by` and
+  // `dropped_at` say whose and since when); `placed = 1` while it's in its owner's office.
+  await sql.execute(`CREATE TABLE IF NOT EXISTS items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER, item TEXT NOT NULL, at INTEGER NOT NULL,
+    placed INTEGER NOT NULL DEFAULT 0, dropped_by INTEGER, dropped_at INTEGER)`);
+  await sql.execute("CREATE INDEX IF NOT EXISTS items_owner ON items (owner_id, item)");
+  // Level rewards handed out, so each comes once.
+  await sql.execute(`CREATE TABLE IF NOT EXISTS rewards (
+    user_id INTEGER NOT NULL, item TEXT NOT NULL, PRIMARY KEY (user_id, item))`);
   // Coins that move between players: stakes and side bets held, then paid out or refunded, and
-  // trades (kind `trade`: an item that changed hands takes its price back from the giver, whose
-  // purchase row went). Office furniture (kind `furniture`, ref `office:<userId>`) is only ever paid
-  // for, never back. Negative amounts leave a wallet. Every `ref` sums to 0 or less, never more,
-  // except `admin`: coins an admin gave or took (kind `admin`).
+  // trades (kind `trade`). Before `items`, a traded item also took its price back from the giver,
+  // whose purchase row went, and office furniture was paid for here (kind `furniture`, ref
+  // `office:<userId>`); those rows stay. Negative amounts leave a wallet. Every `ref` sums to 0 or
+  // less, never more, except `admin`: coins an admin gave or took (kind `admin`).
   await sql.execute(`CREATE TABLE IF NOT EXISTS ledger (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL, amount INTEGER NOT NULL, kind TEXT NOT NULL, ref TEXT NOT NULL,
@@ -64,6 +74,17 @@ export async function migrate(sql: Sql): Promise<void> {
   await sql.execute(`CREATE TABLE IF NOT EXISTS offices (
     user_id INTEGER PRIMARY KEY, furniture TEXT NOT NULL, open INTEGER NOT NULL DEFAULT 1,
     updated_at INTEGER NOT NULL)`);
+  // Into the bag, once: a purchase row was the item (a traded one already belonged to the receiver),
+  // and each office piece was paid for, so it's a placed row.
+  if ((await sql.execute("SELECT 1 FROM items LIMIT 1")).length === 0) {
+    await sql.execute("INSERT INTO items (owner_id, item, at) SELECT user_id, item, at FROM purchases");
+    await sql.execute(
+      `INSERT INTO items (owner_id, item, at, placed)
+       SELECT user_id, 'furn.' || json_extract(p.value, '$.ch'), updated_at, 1 FROM offices, json_each(furniture) p`,
+    );
+    const [{ n }] = (await sql.execute("SELECT COUNT(*) AS n FROM items")) as [{ n: number }];
+    if (n > 0) console.log(`[town] ${n} items into the bag`);
+  }
   // One row per player per finished game (void games aren't recorded), for stats and the Games board.
   await sql.execute(`CREATE TABLE IF NOT EXISTS match_players (
     match_id INTEGER NOT NULL, user_id INTEGER NOT NULL, game TEXT NOT NULL, place INTEGER NOT NULL,
