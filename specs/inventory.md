@@ -9,7 +9,7 @@ Decided:
 - **Rewards are not tradeable** and not droppable (a drop is a trade with extra steps). They show in the
   bag with a 🏅 mark and can be worn; nothing else.
 - **You take what you're on**, or, for a piece nobody can be on, what you face from the next tile.
-  Stepping onto a drop does nothing by itself; G (or a click) takes it.
+  Stepping onto a drop does nothing by itself; G, or a right-click, takes it.
 - **Furniture is tradeable.** Furniture placed in your office is yours: nobody else can take it.
 - **Your office floor is yours too.** Anything dropped in your own office can be taken only by you.
 
@@ -40,8 +40,10 @@ Three patterns, then. **Walk-over** is for games where items are small and plent
 over a laggy connection). **Face and press** is for deliberate, sparse pickups, and games with usable
 things on the floor separate "use" from "take" (Animal Crossing's A vs Y). **Click to take** is the mouse
 version of the same deliberate act, and the better games walk you there first. What we decided is
-Animal Crossing's model with one twist: walk onto the parcel, or sit on the dropped seat, and press a take
-key (**G**; E keeps meaning "use what you face"), or click it and your character goes there and takes.
+Animal Crossing's model with Habbo's mouse: walk onto the parcel, or sit on the dropped seat, and press a
+take key (**G**; E keeps meaning "use what you face"), or **right-click** it (or yourself, when you're on
+it) and your character goes there if needed and takes. Left-click keeps meaning what it means everywhere:
+walk there, sit on it.
 
 The ownership rules are Animal Crossing's and Habbo's combined: placed furniture in your office is yours,
 your office floor is yours, and anything dropped anywhere else is loot for whoever stands on it.
@@ -75,8 +77,10 @@ Sources: [Pokémon items](https://breezewiki.discard.no/pokemon/wiki/Item),
   never blocking. One drop per tile. A worn thing dropped comes off your look.
 - **Taking:** press **G** on it: standing on a parcel or a rug, or sitting on a dropped seat (you stand
   up with it). For a piece nobody can be on (desk, shelf, lamp, plant, coffee machine, TV): stand next to
-  it, face it, press G. Or click it: you walk onto a parcel, sit on a seat, or walk up to a blocking
-  piece, and take. The server checks you occupy the tile, or face it from the next tile for a blocking
+  it, face it, press G. With the mouse, **right-click** the drop, or yourself when you're on one: if
+  you're in reach it's taken at once; if not, you walk onto the parcel, sit on the seat, or walk up to the
+  blocking piece, and take on arrival. **Left-click** stays what it is everywhere: walk there, or sit on
+  it, without taking. The server checks you occupy the tile, or face it from the next tile for a blocking
   piece. Anyone can take a drop in town, the Inn or a company building. In an office, only its owner
   can: a visitor's drop there becomes the owner's to take, or goes back to the visitor after an hour
   like any unclaimed drop. Placed office furniture is never a drop.
@@ -166,11 +170,18 @@ World state (`server/src/actors/world.ts`): `drops?: Record<string, Drop>` with
 - **Trade panel:** "You give" lists bag kinds with counts, rewards and placed pieces excluded.
 - **Drops in the world** (`web/src/game/render.ts`): furniture draws itself from the map; wearables and
   pets are one parcel sprite (a small box with a bow, drawn in `web/src/art/objects.ts`), with the pet's
-  frame instead for pets. A `sign` with the kind's name shows when you're on it or next to it. `G` calls
-  `conn.take()`; clicking a drop walks you onto a parcel, sits you on a seat, or walks you up to a
-  blocking piece (`walkTo` with a `takeOnArrival` flag next to `interactOnArrival` in
-  `web/src/game/input.ts`), and takes. In someone else's office the sign reads `🔒 Sofa` and G says
-  whose floor it is. The ⓘ Controls overlay lists G.
+  frame instead for pets. A `sign` with the kind's name shows when you're on it or next to it.
+  - `G` calls `conn.take()`.
+  - A `contextmenu` listener on the canvas (`web/src/game/input.ts`, next to the `click` one;
+    `preventDefault` always, so the browser menu never shows over the game): a right-click on a drop, or
+    on your own avatar while you're on a drop, takes it if you're in reach, else walks you there
+    (`walkTo` with a `takeOnArrival` flag next to `interactOnArrival`) and takes on arrival. A right-click
+    anywhere else does nothing.
+  - Left-click on a drop is the ordinary `walkTo`: onto a parcel or rug, sitting on a seat, up to a
+    blocking piece; no take.
+  - In someone else's office the sign reads `🔒 Sofa` and both G and the right-click say whose floor it
+    is. The ⓘ Controls overlay lists G and right-click. ponytail: no touch gesture for taking; a phone has
+    neither G nor a right button, and the HUD isn't built for phones today.
 
 ## Tests
 
