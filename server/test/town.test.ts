@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { frontier, plotId } from "@tokenmaxxing/core/maps.ts";
 import { STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
-import { ITEMS } from "@tokenmaxxing/core/shop.ts";
 import type { Notice } from "@tokenmaxxing/core/world.ts";
 import { admin, admit, as, client, event, eventually, MIN, rich, signUp, veteran } from "./rivet.ts";
 
@@ -251,22 +250,23 @@ describe("coins and the shop", () => {
     expect((await a.town.wallet()).balance).toBe(27);
   });
 
-  test("buy, then wear; not before, not twice, not when short", async () => {
+  test("buy, then wear; not before, not when short; a second one is another in the bag", async () => {
     const a = await signUp("shop");
     await expect(a.town.buy("glasses.1")).rejects.toThrow("coins");
     await expect(a.town.setLook({ ...(await a.town.me()).look, glasses: 1 })).rejects.toThrow("shop");
-    await admin().adminSetCoins(a.userId, 100);
-    const before = await a.town.wallet();
+    await admin().adminSetCoins(a.userId, 130);
     const after = await a.town.buy("glasses.1");
-    expect(after.balance).toBe(before.balance - 60);
+    expect(after.balance).toBe(70);
     expect(after.owned).toEqual(["glasses.1"]);
-    await expect(a.town.buy("glasses.1")).rejects.toThrow("already");
+    expect((await a.town.buy("glasses.1")).balance).toBe(10);
+    expect(await a.town.bag()).toEqual([{ item: "glasses.1", count: 2, placed: 0 }]);
+    await expect(a.town.buy("glasses.1")).rejects.toThrow("coins");
     await expect(a.town.buy("nope")).rejects.toThrow();
     await a.town.setLook({ ...(await a.town.me()).look, glasses: 1 });
     expect((await a.town.me()).look.glasses).toBe(1);
   });
 
-  test("level items: worn from level 10, never sold", async () => {
+  test("level items: granted at level 10, worn, never sold", async () => {
     const a = await signUp("top");
     // 10B lifetime: 50 minutes at the 200M a minute that counts.
     const start = Date.now() - 2 * 60 * MIN;
@@ -278,7 +278,7 @@ describe("coins and the shop", () => {
         ),
       );
     expect((await a.town.profile(a.userId, "all")).level).toBe(10);
-    expect((await a.town.wallet()).owned).toContain("hat.4");
+    expect(await a.town.bag()).toContainEqual({ item: "hat.4", count: 1, placed: 0 });
     await a.town.setLook({ ...(await a.town.me()).look, hat: 4 });
     expect((await a.town.me()).look.hat).toBe(4);
     await expect(a.town.buy("hat.4")).rejects.toMatchObject({ code: "not_for_sale" });
@@ -309,10 +309,9 @@ describe("trades", () => {
     await expect(ada.town.offerTrade(bo.userId, coins(0), coins(0))).rejects.toMatchObject({
       code: "invalid_trade",
     });
-    // A level reward (a free outfit until those land) has no price, so it can't move.
-    const unsold = ITEMS.find((i) => i.price === 0)?.id ?? "outfit.0";
+    // A level reward never changes hands.
     await expect(
-      ada.town.offerTrade(bo.userId, { coins: 0, items: [unsold] }, coins(0)),
+      ada.town.offerTrade(bo.userId, { coins: 0, items: ["hat.4"] }, coins(0)),
     ).rejects.toMatchObject({ code: "invalid_trade" });
     const { conn, got } = await notices(bo.token);
     await ada.town.offerTrade(bo.userId, coins(10), coins(0));
@@ -335,6 +334,7 @@ describe("trades", () => {
     expect(after).toMatchObject({ balance: 950, owned: ["hat.1"] });
     expect((await ada.town.me()).look.hat).toBe(0);
     expect(await ada.town.wallet()).toMatchObject({ balance: 900 + 50, owned: [] });
+    await bo.town.setLook({ ...(await bo.town.me()).look, hat: 1 });
     expect(await bo.town.trades()).toEqual({ incoming: [], outgoing: null });
     // The hat's ref stays at minus its price for good; that's not a game in progress.
     await ada.town.offerTrade(bo.userId, coins(1), coins(0));
@@ -381,7 +381,7 @@ describe("trades", () => {
 });
 
 describe("offices", () => {
-  test("from level 10, in a company; every new piece costs coins", async () => {
+  test("from level 10, in a company; pieces come from the bag, free", async () => {
     const sofa = { ch: "s", x: 1, y: 1 };
     const low = await signUp("office");
     await low.town.createCompany("Ground Floor");
@@ -395,10 +395,14 @@ describe("offices", () => {
     await veteran(a);
     await admin().adminSetCoins(a.userId, 150);
     await expect(a.town.setOffice([{ ch: "s", x: 0, y: 1 }])).rejects.toThrow("fit"); // the wall
-    expect((await a.town.setOffice([...STARTER_OFFICE, sofa])).balance).toBe(50);
+    await expect(a.town.setOffice([...STARTER_OFFICE, sofa])).rejects.toThrow("None left");
+    expect((await a.town.buy("furn.s")).balance).toBe(50);
+    await expect(a.town.setOffice([...STARTER_OFFICE, sofa, { ...sofa, y: 2 }])).rejects.toThrow("None left");
+    await a.town.setOffice([...STARTER_OFFICE, sofa]);
     expect((await a.town.wallet()).balance).toBe(50);
+    expect(await a.town.bag()).toContainEqual({ item: "furn.s", count: 1, placed: 1 });
     expect(await a.town.office(a.userId)).toMatchObject({ furniture: [...STARTER_OFFICE, sofa], open: true });
-    // Furniture is paid for, not held like a stake: the account can still be deleted.
+    // Bought, not held like a stake: the account can still be deleted.
     await admin().adminDeleteUser(a.userId);
   });
 });

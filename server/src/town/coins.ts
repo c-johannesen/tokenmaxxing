@@ -1,4 +1,4 @@
-import { officeCost, type Placed, STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
+import { FURNITURE, OFFICE_LEVEL, type Placed, STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
 import { type DayFacts, EMPTY_DAY, QUESTS, questCoins } from "@tokenmaxxing/core/quests.ts";
 import { addDays, dayKey } from "@tokenmaxxing/core/range.ts";
 import {
@@ -12,7 +12,7 @@ import {
 } from "@tokenmaxxing/core/shop.ts";
 import { UserError } from "rivetkit";
 import { all, one, type Sql, type TxSql } from "../actors/shared.ts";
-import { levelOf, lookOf, TOKENS, userById } from "./users.ts";
+import { lookOf, TOKENS, userById } from "./users.ts";
 
 export interface Wallet {
   balance: number;
@@ -20,22 +20,51 @@ export interface Wallet {
   today: number;
   /** Days finished in the top 3, newest first (the last 30 days). */
   wins: { day: string; place: number; coins: number }[];
-  /** Shop item ids: bought, and earned by level. */
+  /** Item ids I hold out of my office, one of each kind: what I can wear or trade. */
   owned: string[];
   /** Today's quests, and which are done so far. */
   quests: { id: string; text: string; coins: number; done: boolean }[];
 }
 
+/** Item ids `userId` holds and could wear or trade: one of each kind, placed furniture left out. */
 export const ownedItems = async (sql: Sql, userId: number): Promise<string[]> =>
-  (await all<{ item: string }>(sql, "SELECT item FROM purchases WHERE user_id = ? ORDER BY at", userId)).map(
-    (r) => r.item,
+  (
+    await all<{ item: string }>(
+      sql,
+      "SELECT item FROM items WHERE owner_id = ? AND placed = 0 GROUP BY item ORDER BY MIN(id)",
+      userId,
+    )
+  ).map((r) => r.item);
+
+/** One kind in a bag: how many, and how many of those are in the office. */
+export interface BagRow {
+  item: string;
+  count: number;
+  placed: number;
+}
+
+export const bag = (sql: Sql, userId: number): Promise<BagRow[]> =>
+  all<BagRow>(
+    sql,
+    `SELECT item, COUNT(*) AS count, SUM(placed) AS placed FROM items WHERE owner_id = ?
+     GROUP BY item ORDER BY MIN(id)`,
+    userId,
   );
 
-/** Shop item ids `userId` owns: bought, and earned by level. */
-export const ownedIds = async (sql: Sql, userId: number): Promise<string[]> => [
-  ...(await ownedItems(sql, userId)),
-  ...levelItems(await levelOf(sql, userId)).map((i) => i.id),
-];
+/** Hands out what `level` has reached, each once: the level rewards, and the office's desk and chair. */
+export async function grantRewards(sql: Sql, userId: number, level: number, now: number): Promise<void> {
+  if (level >= OFFICE_LEVEL) await starterOffice(sql, userId, now);
+  for (const i of levelItems(level)) {
+    const [fresh] = await all(
+      sql,
+      "INSERT INTO rewards (user_id, item) VALUES (?, ?) ON CONFLICT DO NOTHING RETURNING item",
+      userId,
+      i.id,
+    );
+    if (fresh)
+      await sql.execute("INSERT INTO items (owner_id, item, at) VALUES (?, ?, ?)", userId, i.id, now);
+  }
+}
 
 /**
  * Coins are worked out from usage every time rather than stored, so a late sync
@@ -88,7 +117,7 @@ export async function wallet(sql: Sql, userId: number, now: number): Promise<Wal
     balance: earned - (spent ?? 0) + (await ledgerSum(sql, userId)),
     today: coinsForTokens(todays.tokens) + questCoins(todays),
     wins: wins.filter((w) => w.day >= since),
-    owned: await ownedIds(sql, userId),
+    owned: await ownedItems(sql, userId),
     quests: QUESTS.map(({ done, ...q }) => ({ ...q, done: done(todays) })),
   };
 }
@@ -196,13 +225,18 @@ export async function setBalance(
   return { before, balance };
 }
 
-/** Pays for `item` from `userId`'s coins. Run it serialized, so two buys can't both spend the same coins. */
+/**
+ * Pays for one more `item` from `userId`'s coins and puts it in their bag. Run it serialized, so two
+ * buys can't both spend the same coins.
+ */
 export async function buy(sql: Sql, userId: number, item: Item, now: number): Promise<Wallet> {
-  const w = await wallet(sql, userId, now);
-  if (w.owned.includes(item.id)) throw new UserError("You already have it.", { code: "owned" });
-  if (w.balance < item.price) throw new UserError("Not enough coins yet.", { code: "too_poor" });
+  if ((await wallet(sql, userId, now)).balance < item.price)
+    throw new UserError("Not enough coins yet.", { code: "too_poor" });
+  // The item first: if the purchase write fails, it was free rather than paid for and lost.
+  await sql.execute("INSERT INTO items (owner_id, item, at) VALUES (?, ?, ?)", userId, item.id, now);
   await sql.execute(
-    "INSERT INTO purchases (user_id, item, price, at) VALUES (?, ?, ?, ?)",
+    `INSERT INTO purchases (user_id, item, price, at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id, item) DO UPDATE SET price = price + excluded.price`,
     userId,
     item.id,
     item.price,
@@ -234,30 +268,56 @@ export const officeOf = async (sql: Sql, userId: number): Promise<Office> =>
   (await offices(sql, userId))[userId] ?? { furniture: [...STARTER_OFFICE], open: true };
 
 /**
- * Saves `userId`'s furniture and pays for every piece there's more of (moving is free, removing
- * refunds nothing). Run it serialized, like `buy`.
+ * A never-saved office holds `STARTER_OFFICE`. The first time it's saved or opened or closed, that
+ * becomes its row, and the desk and chair placed rows in the bag, free as they always were.
  */
-export async function furnish(sql: Sql, userId: number, furniture: Placed[], now: number): Promise<Wallet> {
-  const cost = officeCost((await officeOf(sql, userId)).furniture, furniture);
-  if ((await wallet(sql, userId, now)).balance < cost)
-    throw new UserError("Not enough coins yet.", { code: "too_poor" });
-  // The furniture first: if the ledger write fails, it was free rather than paid for and lost.
-  await sql.execute(
-    `INSERT INTO offices (user_id, furniture, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(user_id) DO UPDATE SET furniture = excluded.furniture, updated_at = excluded.updated_at`,
+export async function starterOffice(sql: Sql, userId: number, now: number): Promise<void> {
+  const [made] = await all(
+    sql,
+    "INSERT INTO offices (user_id, furniture, updated_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING RETURNING user_id",
     userId,
-    JSON.stringify(furniture),
+    JSON.stringify(STARTER_OFFICE),
     now,
   );
-  if (cost > 0)
-    await sql.execute(
-      "INSERT INTO ledger (user_id, amount, kind, ref, at) VALUES (?, ?, 'furniture', ?, ?)",
-      userId,
-      -cost,
-      `office:${userId}`,
+  if (made)
+    for (const p of STARTER_OFFICE)
+      await sql.execute(
+        "INSERT INTO items (owner_id, item, at, placed) VALUES (?, ?, ?, 1)",
+        userId,
+        `furn.${p.ch}`,
+        now,
+      );
+}
+
+/**
+ * Saves `userId`'s furniture from their bag: as many of each kind as they hold (placed or not) can
+ * go in, those rows are placed and the rest are back in the bag. Placing is free; buying costs.
+ * Run it serialized, like `buy`.
+ */
+export async function furnish(sql: TxSql, userId: number, furniture: Placed[], now: number): Promise<void> {
+  await sql.transaction(async (tx) => {
+    await starterOffice(tx, userId, now);
+    const held = new Map((await bag(tx, userId)).map((b) => [b.item, b.count]));
+    const count = (ch: string) => furniture.filter((p) => p.ch === ch).length;
+    for (const f of FURNITURE)
+      if (count(f.ch) > (held.get(`furn.${f.ch}`) ?? 0))
+        throw new UserError(`None left in your bag: buy another ${f.name} first.`, { code: "not_owned" });
+    await tx.execute("UPDATE items SET placed = 0 WHERE owner_id = ? AND placed = 1", userId);
+    for (const f of FURNITURE)
+      if (count(f.ch) > 0)
+        await tx.execute(
+          "UPDATE items SET placed = 1 WHERE id IN (SELECT id FROM items WHERE owner_id = ? AND item = ? LIMIT ?)",
+          userId,
+          `furn.${f.ch}`,
+          count(f.ch),
+        );
+    await tx.execute(
+      "UPDATE offices SET furniture = ?, updated_at = ? WHERE user_id = ?",
+      JSON.stringify(furniture),
       now,
+      userId,
     );
-  return wallet(sql, userId, now);
+  });
 }
 
 // MARK: The ledger: coins moving between players
@@ -375,8 +435,8 @@ export interface Trade {
 
 /** Both ways a trade goes. */
 const directions = (t: Trade) => [
-  { giverId: t.fromId, giver: t.from, receiverId: t.toId, receiver: t.to, side: t.give },
-  { giverId: t.toId, giver: t.to, receiverId: t.fromId, receiver: t.from, side: t.want },
+  { giverId: t.fromId, giver: t.from, receiverId: t.toId, side: t.give },
+  { giverId: t.toId, giver: t.to, receiverId: t.fromId, side: t.want },
 ];
 
 /** Open offers matching `where` (on `trades`), newest first, with names. */
@@ -391,19 +451,13 @@ export async function tradesWhere(sql: Sql, where: string, ...args: unknown[]): 
   return rows.map((r) => ({ ...r, give: JSON.parse(r.give), want: JSON.parse(r.want) }));
 }
 
-/**
- * Throws unless each side owns what it gives (`not_owned`), has none of what it gets (`owned`),
- * and has the coins it gives (`too_poor`).
- */
+/** Throws unless each side holds what it gives, out of its office (`not_owned`), and has the coins (`too_poor`). */
 export async function checkTrade(sql: Sql, t: Trade, now: number): Promise<void> {
   for (const d of directions(t)) {
     const has = await ownedItems(sql, d.giverId);
-    const gets = await ownedItems(sql, d.receiverId);
-    for (const id of d.side.items) {
-      const name = itemById(id)?.name ?? id;
-      if (!has.includes(id)) throw new UserError(`${d.giver} doesn't have ${name}.`, { code: "not_owned" });
-      if (gets.includes(id)) throw new UserError(`${d.receiver} already has ${name}.`, { code: "owned" });
-    }
+    for (const id of d.side.items)
+      if (!has.includes(id))
+        throw new UserError(`${d.giver} doesn't have ${itemById(id)?.name ?? id}.`, { code: "not_owned" });
     if (d.side.coins === 0) continue;
     const { balance } = await wallet(sql, d.giverId, now);
     if (balance < d.side.coins)
@@ -412,11 +466,9 @@ export async function checkTrade(sql: Sql, t: Trade, now: number): Promise<void>
 }
 
 /**
- * Moves `give` from `from` to `to` and `want` the other way, in one ref, all or nothing, and drops
- * the offer. Run it serialized. Throws `too_poor` / `not_owned` / `owned` when something changed
- * since the offer.
- * ponytail: items live in `purchases` and their value follows them through the ledger. If that ever
- * reads wrong, the upgrade is an `items (user_id, item)` table for ownership, `purchases` left as spend.
+ * Moves `give` from `from` to `to` and `want` the other way, all or nothing, and drops the offer:
+ * coins in one ref, items as one row of each kind. Run it serialized. Throws `too_poor` /
+ * `not_owned` when something changed since the offer.
  */
 export async function settleTrade(sql: TxSql, t: Trade, now: number): Promise<void> {
   await sql.transaction(async (tx) => {
@@ -438,25 +490,19 @@ export async function settleTrade(sql: TxSql, t: Trade, now: number): Promise<vo
         await entry(d.receiverId, d.side.coins);
       }
       if (d.side.items.length === 0) continue;
-      for (const id of d.side.items) {
-        const [bought] = await all<{ price: number }>(
-          tx,
-          "DELETE FROM purchases WHERE user_id = ? AND item = ? RETURNING price",
+      for (const id of d.side.items)
+        await tx.execute(
+          `UPDATE items SET owner_id = ? WHERE id =
+             (SELECT id FROM items WHERE owner_id = ? AND item = ? AND placed = 0 LIMIT 1)`,
+          d.receiverId,
           d.giverId,
           id,
         );
-        // Without its purchase row the item would be refunded; this keeps the giver's balance put.
-        if (bought!.price > 0) await entry(d.giverId, -bought!.price);
-        await tx.execute(
-          "INSERT INTO purchases (user_id, item, price, at) VALUES (?, ?, 0, ?)",
-          d.receiverId,
-          id,
-          now,
-        );
-      }
-      // Nobody wears what they don't own.
+      // Nobody wears what they don't own: off it comes when the last one goes.
+      const left = await ownedItems(tx, d.giverId);
       const look = lookOf(await userById(tx, d.giverId));
-      for (const i of itemsIn(look)) if (d.side.items.includes(i.id)) look[i.slot] = 0;
+      for (const i of itemsIn(look))
+        if (d.side.items.includes(i.id) && !left.includes(i.id)) look[i.slot] = 0;
       await tx.execute("UPDATE users SET look = ? WHERE id = ?", JSON.stringify(look), d.giverId);
     }
   });

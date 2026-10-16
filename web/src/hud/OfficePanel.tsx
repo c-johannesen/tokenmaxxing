@@ -1,32 +1,19 @@
 import { MAPS } from "@tokenmaxxing/core/maps.ts";
-import {
-  FURNITURE,
-  OFFICE_PIECES,
-  officeCost,
-  type Placed,
-  parseOffice,
-  pieceOf,
-} from "@tokenmaxxing/core/office.ts";
+import { FURNITURE, OFFICE_PIECES, type Placed, parseOffice, pieceOf } from "@tokenmaxxing/core/office.ts";
 import { useEffect, useState } from "react";
 import { world } from "../game/world.ts";
 import { town } from "../net.ts";
-import { hud, useHud } from "../store.ts";
 import { Modal, Pills, useRun } from "./ui.tsx";
 
-/** Every piece with its price, and ✕ for throwing things out. */
-const TOOLS = [
-  ...FURNITURE.map((f) => [f.ch, `${f.name} 🪙 ${f.price}`] as const),
-  ["", "✕ Remove"] as const,
-];
-
 /**
- * My office's editor. Changes stay here until Save, which pays for every piece there's more of;
- * the world keeps drawing the saved office until then.
+ * My office's editor, from my bag: a piece goes down only if the bag has one left, and one picked up
+ * or thrown out with ✕ is back in it. Changes stay here until Save; the world keeps drawing the saved
+ * office until then.
  * It opens with E facing a wall, or from the menu: nobody can face the door, a step goes through it.
  */
 export function OfficePanel() {
-  const wallet = useHud((s) => s.wallet);
   const [saved, setSaved] = useState<{ furniture: Placed[]; open: boolean } | null>(null);
+  const [held, setHeld] = useState<Map<string, number> | null>(null);
   const [list, setList] = useState<Placed[]>([]);
   const [tool, setTool] = useState<string>(FURNITURE[0]!.ch);
   const { error, busy, run } = useRun();
@@ -35,10 +22,17 @@ export function OfficePanel() {
       setSaved(o);
       setList(o.furniture);
     });
+    void town.bag().then((b) => setHeld(new Map(b.map((r) => [r.item, r.count]))));
   }, []);
-  if (!saved || !wallet) return <Modal title="🛋 Your office">Loading…</Modal>;
+  if (!saved || !held) return <Modal title="🛋 Your office">Loading…</Modal>;
 
-  const cost = officeCost(saved.furniture, list);
+  // A new office's desk and chair are rows from its first save (or sync at level 10): never below 0.
+  const left = (ch: string) =>
+    Math.max(0, (held.get(`furn.${ch}`) ?? 0) - list.filter((p) => p.ch === ch).length);
+  const tools = [
+    ...FURNITURE.map((f) => [f.ch, `${f.name} ×${left(f.ch)}`] as const),
+    ["", "✕ Remove"] as const,
+  ];
   const at = (x: number, y: number) =>
     list.find((p) => p.y === y && x >= p.x && x < p.x + (pieceOf(p.ch)?.w ?? 1));
   // A placed piece is picked up (free to put down again), or thrown out with ✕.
@@ -50,7 +44,7 @@ export function OfficePanel() {
       return;
     }
     const next = [...list, { ch: tool, x, y }];
-    if (tool && parseOffice(next)) setList(next);
+    if (tool && left(tool) > 0 && parseOffice(next)) setList(next);
   };
 
   return (
@@ -71,7 +65,7 @@ export function OfficePanel() {
         </span>
       </p>
       <div className="office-tools">
-        <Pills value={tool} options={TOOLS} onChange={setTool} />
+        <Pills value={tool} options={tools} onChange={setTool} />
       </div>
       <div
         className="plot-grid small"
@@ -96,23 +90,21 @@ export function OfficePanel() {
         })}
       </div>
       <p className="wallet">
-        Costs 🪙 {cost} · you have 🪙 {wallet.balance.toLocaleString()}
         <span className="muted">
-          {" "}
-          · {list.length}/{OFFICE_PIECES} pieces{" "}
+          {list.length}/{OFFICE_PIECES} pieces{" "}
         </span>
         <button
           type="button"
           className="primary"
-          disabled={busy || cost > wallet.balance}
+          disabled={busy}
           onClick={run(async () => {
-            hud.set({ wallet: await town.setOffice(list) });
+            await town.setOffice(list);
             setSaved({ ...saved, furniture: list });
           })}
         >
           Save
         </button>
-        {cost > wallet.balance && <span className="muted"> Not enough coins</span>}
+        {tool && left(tool) === 0 && <span className="muted"> None left in your bag</span>}
       </p>
       {error && <p className="error">{error}</p>}
     </Modal>

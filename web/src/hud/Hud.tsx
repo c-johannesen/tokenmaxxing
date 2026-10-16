@@ -7,6 +7,7 @@ import { chatBeside, hud, useHud } from "../store.ts";
 import { AppSignIn } from "./AppSignIn.tsx";
 import { AppUpdate, tauri } from "./AppUpdate.tsx";
 import { ArcadePanel, GamesBox, InviteToast, NewTable } from "./Arcade.tsx";
+import { Bag } from "./Bag.tsx";
 import { Chat } from "./Chat.tsx";
 import { CompanyCard } from "./CompanyCard.tsx";
 import { CompanyPanel } from "./CompanyPanel.tsx";
@@ -122,6 +123,15 @@ function Stats() {
       <button
         type="button"
         className="icon"
+        title="Bag"
+        aria-label="Bag"
+        onClick={() => hud.set({ panel: { kind: "bag" } })}
+      >
+        🎒
+      </button>
+      <button
+        type="button"
+        className="icon"
         title={waiting ? `Company: ${waiting} asking to join` : "Company"}
         aria-label={waiting ? `Company: ${waiting} asking to join` : "Company"}
         onClick={() => hud.set({ panel: { kind: "company" } })}
@@ -180,6 +190,8 @@ function Panel() {
       return <LookPicker />;
     case "shop":
       return <Shop />;
+    case "bag":
+      return <Bag />;
     case "arcade":
       return <ArcadePanel />;
     case "newTable":
@@ -206,6 +218,9 @@ function Panel() {
             </button>
             <button type="button" onClick={() => hud.set({ panel: { kind: "shop" } })}>
               🪙 Shop
+            </button>
+            <button type="button" onClick={() => hud.set({ panel: { kind: "bag" } })}>
+              🎒 Bag
             </button>
             <button type="button" onClick={() => hud.set({ panel: { kind: "trades" } })}>
               🔁 Trades

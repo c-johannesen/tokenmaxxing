@@ -1,21 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { MAPS } from "../src/maps.ts";
-import { doorsFor, hqMap, OFFICE_PIECES, officeCost, parseOffice, STARTER_OFFICE } from "../src/office.ts";
+import { doorsFor, hqMap, OFFICE_PIECES, parseOffice, STARTER_OFFICE } from "../src/office.ts";
 import { route } from "../src/world.ts";
 
 describe("offices", () => {
   const sofa = { ch: "s", x: 1, y: 1 };
   const rug = { ch: "=", x: 2, y: 1 };
 
-  test("you pay for what's new; moving is free and removing refunds nothing", () => {
-    expect(officeCost(STARTER_OFFICE, [...STARTER_OFFICE, sofa, rug])).toBe(110);
-    const [desk, chair] = STARTER_OFFICE;
-    expect(officeCost(STARTER_OFFICE, [{ ...desk!, x: 8 }, chair!])).toBe(0);
-    expect(officeCost(STARTER_OFFICE, [desk!])).toBe(0);
-  });
-
   test("only known pieces on the floor, one per tile, at most OFFICE_PIECES", () => {
-    expect(parseOffice([...STARTER_OFFICE, sofa])).toEqual([...STARTER_OFFICE, sofa]);
+    expect(parseOffice([...STARTER_OFFICE, sofa, rug])).toEqual([...STARTER_OFFICE, sofa, rug]);
     expect(parseOffice([{ ch: "s", x: 0, y: 1 }])).toBeNull(); // the wall
     expect(parseOffice([{ ch: "t", x: 10, y: 1 }])).toBeNull(); // half in the wall
     expect(parseOffice([sofa, { ...sofa }])).toBeNull();

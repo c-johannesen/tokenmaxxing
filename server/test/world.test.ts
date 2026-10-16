@@ -269,6 +269,7 @@ describe("world", () => {
 
     // Deleted, their office goes from the world too; the guest still inside sees a new one.
     await admin().adminSetCoins(owner.userId, 100);
+    await owner.town.buy("furn.s");
     await owner.town.setOffice([...STARTER_OFFICE, { ch: "s", x: 1, y: 1 }]);
     await admin().adminDeleteUser(owner.userId);
     const again = await connect(guest.token);

@@ -46,6 +46,7 @@ export type {
   AdminLogEntry,
   AdminOverview,
   AdminUser,
+  BagRow,
   BoardCompany,
   BoardPlayer,
   CompanyProfile,
