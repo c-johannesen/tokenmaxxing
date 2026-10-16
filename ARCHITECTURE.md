@@ -170,6 +170,14 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 - Trades: `offerTrade` (10 an hour; a new offer replaces your old one), `trades`, `acceptTrade`,
   `declineTrade`, `withdrawTrade`. See *Coins and the shop*.
 - Offices: `office`, `setOffice` (places pieces from the bag), `setOfficeOpen`.
+- Drops: `drop` takes one of a kind out of your bag (not a reward or a placed piece; at most 5 of yours on
+  the floor at once) and asks `world.placeDrop` to put it where you are; a full room says so, and the row
+  comes straight back. On the floor a row has `owner_id` NULL, with `dropped_by` and `dropped_at`.
+  `pickUp` (from `world.take`) puts it in the taker's bag, unless it's gone home already. **The sweeper**
+  is a cron alarm (`sweep`, every 10 minutes; it outlives restarts and wakes the town): drops nobody took
+  in an hour come off the floor (`world.removeDrops`) and go back to their droppers. A closed company's
+  building and a deleted owner's office give theirs back at once (`removeCompany` and `removePlayer`
+  return the ids); a deleted account's own drops are deleted with it.
 - Admin (`town/admin.ts`, for `/admin`): `adminOverview`, `adminUsers` and `adminCompanies`; rename people
   and companies; set a balance (the difference goes in the `ledger` as kind and ref `admin`); take someone
   out of their company; close a company; wipe someone's usage (their `player` drops its raw events too:
@@ -178,7 +186,8 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   (`removePlayer`) and destroys their `player` (`close`), so every token and session stops working. It's
   refused while they have coins in an unsettled game. Their `ledger` and `match_players` rows stay, and
   `deleted_users` keeps new ids above theirs, so nobody inherits them.
-- Every change a player could see is pushed to `world` (`town/sync.ts`); `world` never asks `town`.
+- Every change a player could see is pushed to `world` (`town/sync.ts`); `world` asks `town` only to put a
+  taken drop in the bag (`pickUp`).
 
 **`world["main"]`**: everything live, in actor state, with chat in SQLite (last 200 lines per room).
 - A 10 Hz tick sends each room its `moves`, and head counts (`occupancy`) and who's inside each house
@@ -186,9 +195,13 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 - Actions: `join`, `step` (one adjacent walkable tile, no faster than running; doors change room), `sit`,
   `drink` (a coffee machine: each cup adds 90 s of shaking, up to 6 stacked, sent as `coffeeUntil` in `info`),
   `say` (20 a minute; `@name` sends `mention` to someone in another room), `back` (after a game), `visit`
-  (someone's open office, from their card).
+  (someone's open office, from their card), `take` (G: the drop you're on, or a blocking piece you face; on
+  an office floor, only its owner).
 - Events: `snapshot` (on joining or changing room), `moves`, `info`, `companies`, `occupancy`, `houses`, `notice`,
-  `chat`, `mention`.
+  `chat`, `mention`, `drop`, `pickup`.
+- **Drops** (`drops` in state, by items row id; at most 30 a room): a parcel on the dropper's tile or the
+  nearest free one, furniture as itself in the room's map (`mapOf`), so a dropped sofa seats. `take` lifts
+  it off the floor first, then asks `town.pickUp`; if that call fails, it goes back down.
 - **Resting.** Closing the last tab sends you to your bed; offline with agents active in the last 10 minutes, to
   your desk. Company members rest in their house, others at the Inn. Your spot is remembered: the next `join` puts
   you back there. Online with 3 minutes without input, you just doze where you are (`dozing`, drawn as a "z") until

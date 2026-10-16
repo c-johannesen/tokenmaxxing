@@ -282,11 +282,31 @@ describe("coins and the shop", () => {
     await a.town.setLook({ ...(await a.town.me()).look, hat: 4 });
     expect((await a.town.me()).look.hat).toBe(4);
     await expect(a.town.buy("hat.4")).rejects.toMatchObject({ code: "not_for_sale" });
+    await expect(a.town.drop("hat.4")).rejects.toMatchObject({ code: "not_tradeable" });
 
     const b = await signUp("top");
     await expect(b.town.setLook({ ...(await b.town.me()).look, hat: 4 })).rejects.toMatchObject({
       code: "not_owned",
     });
+  });
+});
+
+describe("drops", () => {
+  test("a worn hat dropped comes off; only what you hold; five on the floor at a time", async () => {
+    const a = await rich("drop", 150);
+    await a.town.createCompany("Butterfingers"); // its floor is cleared when the test ends
+    await a.town.buy("hat.1");
+    for (let i = 0; i < 5; i++) await a.town.buy("furn.=");
+    await a.town.setLook({ ...(await a.town.me()).look, hat: 1 });
+    expect(await a.town.drop("hat.1")).toMatchObject({
+      notice: "Dropped the Beanie.",
+      drop: { item: "hat.1", by: a.userId },
+    });
+    expect((await a.town.me()).look.hat).toBe(0);
+    await expect(a.town.drop("hat.1")).rejects.toMatchObject({ code: "not_owned" });
+    for (let i = 0; i < 4; i++) await a.town.drop("furn.=");
+    await expect(a.town.drop("furn.=")).rejects.toMatchObject({ code: "too_many" });
+    expect(await a.town.bag()).toEqual([{ item: "furn.=", count: 1, placed: 0 }]);
   });
 });
 

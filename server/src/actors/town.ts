@@ -10,7 +10,14 @@ import {
   TRADE_COINS_CAP,
   TRADE_ITEMS_CAP,
 } from "@tokenmaxxing/core/shop.ts";
-import { type CompanyInfo, defaultLook, type Look, parseLook } from "@tokenmaxxing/core/world.ts";
+import {
+  type CompanyInfo,
+  type Drop,
+  defaultLook,
+  dropName,
+  type Look,
+  parseLook,
+} from "@tokenmaxxing/core/world.ts";
 import { actor, UserError } from "rivetkit";
 import { db } from "rivetkit/db";
 import { canBrand } from "../brand.ts";
@@ -47,6 +54,7 @@ import {
   checkTrade,
   type Entry,
   furnish,
+  giveBack,
   grantRewards,
   type HoldKind,
   heldIn,
@@ -57,12 +65,16 @@ import {
   ownedItems,
   type PayKind,
   pay,
+  pickUp,
   refund,
   setBalance,
   settleTrade,
   starterOffice,
   type Trade,
+  takeOut,
   tradesWhere,
+  unclaimed,
+  unwear,
   type Wallet,
   wallet,
 } from "../town/coins.ts";
@@ -165,6 +177,9 @@ const TRADES_PER_HOUR = 10;
 const HOUR = 3_600_000;
 /** Offers older than this are gone. */
 const TRADE_TTL = 7 * 24 * HOUR;
+/** Drops nobody took go back to their droppers after this; the sweeper looks every `SWEEP_MS`. */
+const DROP_TTL = HOUR;
+const SWEEP_MS = 10 * 60_000;
 
 /** Many rows in few statements (a first sync can report years of days). */
 async function insertRows(sql: Sql, insert: string, rows: unknown[][]): Promise<void> {
@@ -207,6 +222,11 @@ export const town = actor({
     ...(await authenticate(params, c.client(), c.vars.tokens)),
     ip: clientIpOf(c.request),
   }),
+  // The sweeper's alarm. Set once: it outlives restarts, and wakes the town when it's asleep.
+  onWake: async (c) => {
+    if (!(await c.cron.get("sweep")))
+      await c.cron.every({ name: "sweep", interval: SWEEP_MS, action: "sweep" });
+  },
   actions: {
     health: async (c): Promise<void> => {
       requireInternal(c.conn.state);
@@ -426,6 +446,54 @@ export const town = actor({
       return c.vars.serial(() => buy(c.db, userId, item, Date.now()));
     },
 
+    // MARK: Drops
+
+    /**
+     * One of mine onto the floor where I am, for anyone to take. A full room says so (the notice is for
+     * the Bag), and the item stays mine.
+     */
+    drop: async (c, itemId: unknown): Promise<{ notice: string; drop?: Drop }> => {
+      const userId = requireUser(c.conn.state);
+      const client = c.client<typeof registry>();
+      const out = await c.vars.serial(async () => {
+        const id = await takeOut(c.db, userId, itemId, Date.now());
+        // ponytail: one that landed but timed out stays on the floor with its row back here: taking it
+        // gets nothing (`pickUp` is false). `removeDrops` it here if that ever shows up.
+        const put = await main(client)
+          .world.placeDrop({ id, item: itemId as string, by: userId })
+          .catch((err) => {
+            console.warn(`[drop] ${id}: ${String(err)}`);
+            return { notice: "That didn't work. Try again." };
+          });
+        if ("notice" in put) {
+          await giveBack(c.db, [id]);
+          return put;
+        }
+        await unwear(c.db, userId, [put.item]);
+        return { notice: `Dropped the ${dropName(put)}.`, drop: put };
+      });
+      // Off it comes, if it was the last one worn.
+      if ("drop" in out) await pushPlayers(c.db, client, [userId]);
+      return out;
+    },
+
+    /** From `world.take`: a drop into the taker's bag. False if it went back to its dropper first. */
+    pickUp: async (c, dropId: number, userId: number): Promise<boolean> => {
+      requireInternal(c.conn.state);
+      return pickUp(c.db, dropId, userId);
+    },
+
+    /** The alarm, every 10 minutes: drops nobody took in an hour go back to whoever dropped them. */
+    sweep: async (c): Promise<void> => {
+      // The alarm calls with no connection; anyone else has one, and has to be inside.
+      if (c.conn) requireInternal(c.conn.state);
+      const ids = await unclaimed(c.db, Date.now() - DROP_TTL);
+      if (ids.length === 0) return;
+      // Off the floor first: if `world` is down, nothing changed and the next sweep tries again.
+      await main(c.client<typeof registry>()).world.removeDrops(ids);
+      await giveBack(c.db, ids);
+    },
+
     // MARK: Trades
 
     /** Offers `toId` my `give` for their `want`. It replaces my open offer, if I had one. */
@@ -487,7 +555,7 @@ export const town = actor({
       const client = c.client<typeof registry>();
       // Looks may have changed.
       await pushPlayers(c.db, client, [trade.fromId, userId]);
-      await notify(client, trade.fromId, { text: `${trade.to} accepted your trade.`, open: "shop" });
+      await notify(client, trade.fromId, { text: `${trade.to} accepted your trade.`, open: "bag" });
       return wallet(c.db, userId, now);
     },
 
@@ -777,7 +845,8 @@ export const town = actor({
       await logAdmin(c.db, "delete user", who(user), null, now);
       const client = c.client<typeof registry>();
       await push(c.db, client, changed);
-      await main(client).world.removePlayer(user.id);
+      // Out of the world with their drops; what others dropped in their office goes back to them.
+      await giveBack(c.db, await main(client).world.removePlayer(user.id));
       await client.player.get([String(user.id)], internal).close();
     },
 

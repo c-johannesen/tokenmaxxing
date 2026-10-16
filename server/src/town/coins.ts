@@ -4,6 +4,7 @@ import { addDays, dayKey } from "@tokenmaxxing/core/range.ts";
 import {
   coinsForTokens,
   type Item,
+  isTradeable,
   itemById,
   itemsIn,
   levelItems,
@@ -498,12 +499,77 @@ export async function settleTrade(sql: TxSql, t: Trade, now: number): Promise<vo
           d.giverId,
           id,
         );
-      // Nobody wears what they don't own: off it comes when the last one goes.
-      const left = await ownedItems(tx, d.giverId);
-      const look = lookOf(await userById(tx, d.giverId));
-      for (const i of itemsIn(look))
-        if (d.side.items.includes(i.id) && !left.includes(i.id)) look[i.slot] = 0;
-      await tx.execute("UPDATE users SET look = ? WHERE id = ?", JSON.stringify(look), d.giverId);
+      await unwear(tx, d.giverId, d.side.items);
     }
   });
 }
+
+/** Nobody wears what they don't hold: each of `items` comes off `userId`'s look when their last one goes. */
+export async function unwear(sql: Sql, userId: number, items: string[]): Promise<void> {
+  const left = await ownedItems(sql, userId);
+  const look = lookOf(await userById(sql, userId));
+  for (const i of itemsIn(look)) if (items.includes(i.id) && !left.includes(i.id)) look[i.slot] = 0;
+  await sql.execute("UPDATE users SET look = ? WHERE id = ?", JSON.stringify(look), userId);
+}
+
+// MARK: Drops: items on the floor, in `world`
+
+/** At most this many of one person's drops on the floor at once. */
+export const DROPS_PER_PERSON = 5;
+
+/**
+ * Takes one `item` out of `userId`'s bag for the floor (`owner_id` NULL, with who and when): not a
+ * reward, not a placed piece, and not past `DROPS_PER_PERSON`. Returns the row's id. Run it serialized,
+ * like `buy`.
+ */
+export async function takeOut(sql: Sql, userId: number, item: unknown, now: number): Promise<number> {
+  if (!isTradeable(item)) throw new UserError("That one stays with you.", { code: "not_tradeable" });
+  const [{ n }] = (await all<{ n: number }>(
+    sql,
+    "SELECT COUNT(*) AS n FROM items WHERE dropped_by = ? AND owner_id IS NULL",
+    userId,
+  )) as [{ n: number }];
+  if (n >= DROPS_PER_PERSON)
+    throw new UserError(`You have ${n} things on the floor already. Unclaimed, they come back in an hour.`, {
+      code: "too_many",
+    });
+  const [row] = await all<{ id: number }>(
+    sql,
+    `UPDATE items SET owner_id = NULL, dropped_by = ?, dropped_at = ? WHERE id =
+       (SELECT id FROM items WHERE owner_id = ? AND item = ? AND placed = 0 LIMIT 1) RETURNING id`,
+    userId,
+    now,
+    userId,
+    item,
+  );
+  if (!row) throw new UserError("None left in your bag.", { code: "not_owned" });
+  return row.id;
+}
+
+/** A drop into `userId`'s bag. False if it isn't on the floor any more (the sweeper sent it home). */
+export const pickUp = async (sql: Sql, id: number, userId: number): Promise<boolean> =>
+  (
+    await all(
+      sql,
+      "UPDATE items SET owner_id = ?, dropped_by = NULL, dropped_at = NULL WHERE id = ? AND owner_id IS NULL RETURNING id",
+      userId,
+      id,
+    )
+  ).length > 0;
+
+/** Drops (`ids`, those still on the floor) back in their droppers' bags; a deleted dropper's are gone. */
+export async function giveBack(sql: Sql, ids: number[]): Promise<void> {
+  const list = JSON.stringify(ids);
+  const mine = "owner_id IS NULL AND id IN (SELECT value FROM json_each(?))";
+  await sql.execute(`DELETE FROM items WHERE ${mine} AND dropped_by NOT IN (SELECT id FROM users)`, list);
+  await sql.execute(
+    `UPDATE items SET owner_id = dropped_by, dropped_by = NULL, dropped_at = NULL WHERE ${mine}`,
+    list,
+  );
+}
+
+/** Drops on the floor since before `before`, for the sweeper. */
+export const unclaimed = async (sql: Sql, before: number): Promise<number[]> =>
+  (
+    await all<{ id: number }>(sql, "SELECT id FROM items WHERE owner_id IS NULL AND dropped_at < ?", before)
+  ).map((r) => r.id);

@@ -358,9 +358,9 @@ export const world = actor({
 
     /**
      * G: the drop you're on (standing on a parcel or rug, sitting on a seat), else a piece nobody can be
-     * on that you face. Off an office floor, only its owner takes anything.
+     * on that you face. Off an office floor, only its owner takes anything. `town` puts it in your bag.
      */
-    take: (c): null | { notice: string; drop?: Drop } => {
+    take: async (c): Promise<null | { notice: string; drop?: Drop }> => {
       const userId = requireUser(c.conn.state);
       const p = c.state.players[userId];
       if (!p || (p.state !== "idle" && p.state !== "sit")) return null;
@@ -376,15 +376,20 @@ export const world = actor({
       const owner = ownerOfOffice(p.room);
       if (owner !== null && owner !== userId)
         return { notice: `That's ${c.state.players[owner]?.name ?? "someone"}'s floor.` };
-      delete c.state.drops![d.id];
-      syncDrops(c.state, p.room);
-      if (d === on && p.state === "sit") {
-        p.state = "idle";
-        c.vars.dirty.add(p.id);
+      // Off the floor before asking `town`, so nobody takes it twice meanwhile.
+      lift(c, d);
+      const took = await main(c.client())
+        .town.pickUp(d.id, userId)
+        .catch((err) => {
+          console.warn(`[take] ${d.id}: ${String(err)}`);
+          return null;
+        });
+      if (took === null) {
+        lay(c, d);
+        return { notice: "That didn't work. Try again." };
       }
-      sendToRoom(c, p.room, "pickup", { id: d.id });
-      // Next: `town.pickUp(d.id, userId)` puts it in the bag.
-      return { notice: `🎒 Took the ${dropName(d)}.`, drop: d };
+      // False: the sweeper sent it home first, so it was gone already.
+      return took ? { notice: `🎒 Took the ${dropName(d)}.`, drop: d } : null;
     },
 
     say: async (c, rawText: unknown): Promise<void> => {
@@ -564,14 +569,22 @@ export const world = actor({
         for (const id of new Set([before, p.companyId])) if (id != null) await rebuildHq(c, id);
     },
 
-    /** From `town`, when an admin deletes an account: out of the world, and their tabs closed. */
-    removePlayer: async (c, userId: number): Promise<void> => {
+    /**
+     * From `town`, when an admin deletes an account: out of the world, and their tabs closed. Their drops
+     * go, and so does what's on their office floor: returns those ids, for `town` to give back.
+     */
+    removePlayer: async (c, userId: number): Promise<number[]> => {
       requireInternal(c.conn.state);
+      const drops = Object.values(c.state.drops ?? {}).filter(
+        (d) => d.by === userId || d.room === `office:${userId}`,
+      );
+      for (const d of drops) lift(c, d);
+      const ids = drops.map((d) => d.id);
       // Their office goes too; anyone inside stays until they leave.
       delete c.state.offices?.[userId];
       OFFICES.delete(userId);
       const p = c.state.players[userId];
-      if (!p) return;
+      if (!p) return ids;
       sendToRoom(c, p.room, "moves", { room: p.room, join: [], m: [], leave: [userId] } satisfies Moves);
       delete c.state.players[userId];
       for (const vars of [c.vars.online, c.vars.announced, c.vars.steps, c.vars.jumps]) vars.delete(userId);
@@ -581,6 +594,7 @@ export const world = actor({
         if (s.kind === "user" && s.userId === userId) void conn.disconnect("deleted");
       }
       if (p.companyId !== null) await rebuildHq(c, p.companyId);
+      return ids;
     },
 
     setCompany: (c, company: CompanyInfo): void => {
@@ -590,12 +604,16 @@ export const world = actor({
       c.broadcast("companies", Object.values(c.state.companies));
     },
 
-    removeCompany: async (c, id: number): Promise<void> => {
+    /** A company closed. Returns the drops on its building's floor, for `town` to give back. */
+    removeCompany: async (c, id: number): Promise<number[]> => {
       requireInternal(c.conn.state);
       delete c.state.companies[id];
+      const drops = dropsIn(c.state, `hq:${id}`);
+      for (const d of drops) lift(c, d);
       buildTown(c.state, c.vars.dirty);
       await rebuildHq(c, id);
       c.broadcast("companies", Object.values(c.state.companies));
+      return drops.map((d) => d.id);
     },
 
     /** From `town`: an office saved, opened or closed. Whoever is inside sees it; closing throws nobody out. */
@@ -648,27 +666,16 @@ export const world = actor({
       const spot = findSpot(map, [p.x, p.y], piece?.w ?? 1, 1, games, taken);
       if (!spot) return full;
       const drop: Drop = { id, item, room: p.room, ...spot, by, at: Date.now() };
-      c.state.drops ??= {};
-      c.state.drops[drop.id] = drop;
-      syncDrops(c.state, p.room);
-      sendToRoom(c, p.room, "drop", drop);
+      lay(c, drop);
       return drop;
     },
 
-    /** From `town`'s sweeper: drops gone back to their droppers. Anyone sitting on one stands up there. */
+    /** From `town`'s sweeper: drops gone back to their droppers. */
     removeDrops: (c, ids: number[]): void => {
       requireInternal(c.conn.state);
       for (const id of ids) {
         const d = c.state.drops?.[id];
-        if (!d) continue;
-        delete c.state.drops![id];
-        syncDrops(c.state, d.room);
-        for (const p of Object.values(c.state.players))
-          if (p.room === d.room && p.state === "sit" && dropCovers(d, p.x, p.y)) {
-            p.state = "idle";
-            c.vars.dirty.add(p.id);
-          }
-        sendToRoom(c, d.room, "pickup", { id });
+        if (d) lift(c, d);
       }
     },
 
@@ -1040,6 +1047,26 @@ const syncDrops = (s: WorldState, room: RoomId): void =>
     room,
     dropsIn(s, room).map((d) => ({ ...d })),
   );
+
+/** Onto the floor: in its room's map, and the room sees it. */
+function lay(c: Sender, d: Drop): void {
+  c.state.drops ??= {};
+  c.state.drops[d.id] = d;
+  syncDrops(c.state, d.room);
+  sendToRoom(c, d.room, "drop", d);
+}
+
+/** Off the floor: out of the map, anyone sitting on it stands up there, and the room sees it go. */
+function lift(c: Sender & { vars: Vars }, d: Drop): void {
+  delete c.state.drops?.[d.id];
+  syncDrops(c.state, d.room);
+  for (const p of Object.values(c.state.players))
+    if (p.room === d.room && p.state === "sit" && dropCovers(d, p.x, p.y)) {
+      p.state = "idle";
+      c.vars.dirty.add(p.id);
+    }
+  sendToRoom(c, d.room, "pickup", { id: d.id });
+}
 
 /** Someone's office; one never saved is new: `STARTER_OFFICE`, open. */
 const officeOf = (s: WorldState, userId: number): Office =>

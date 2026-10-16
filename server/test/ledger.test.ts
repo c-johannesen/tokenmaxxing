@@ -7,14 +7,18 @@ import {
   balances,
   buy,
   furnish,
+  giveBack,
   grantRewards,
   heldIn,
   hold,
   pay,
+  pickUp,
   refund,
   setBalance,
   settleTrade,
   type Trade,
+  takeOut,
+  unclaimed,
   wallet,
 } from "../src/town/coins.ts";
 import { migrate } from "../src/town/schema.ts";
@@ -202,6 +206,33 @@ describe("the bag", () => {
     ]);
     expect(await bag(sql, 3)).toEqual([{ item: "glasses.1", count: 1, placed: 0 }]);
     expect(await balance(2)).toBe(80 - 100);
+  });
+});
+
+describe("drops", () => {
+  const HOUR = 3_600_000;
+
+  test("the sweeper sends an hour-old drop home; taking it after gets nothing", async () => {
+    await buy(sql, 1, itemById("glasses.1")!, NOW);
+    await buy(sql, 1, itemById("glasses.1")!, NOW);
+    const old = await takeOut(sql, 1, "glasses.1", NOW - 2 * HOUR);
+    const fresh = await takeOut(sql, 1, "glasses.1", NOW - HOUR / 6);
+    expect(await bag(sql, 1)).toEqual([]);
+    expect(await unclaimed(sql, NOW - HOUR)).toEqual([old]);
+    await giveBack(sql, [old]);
+    expect(await pickUp(sql, old, 2)).toBe(false);
+    expect(await bag(sql, 1)).toEqual([{ item: "glasses.1", count: 1, placed: 0 }]);
+    expect(await pickUp(sql, fresh, 2)).toBe(true);
+    expect(await bag(sql, 2)).toEqual([{ item: "glasses.1", count: 1, placed: 0 }]);
+    expect(await unclaimed(sql, NOW)).toEqual([]);
+  });
+
+  test("a deleted dropper's drop is gone, not given back", async () => {
+    await buy(sql, 2, itemById("glasses.1")!, NOW);
+    const id = await takeOut(sql, 2, "glasses.1", NOW);
+    await sql.execute("DELETE FROM users WHERE id = 2");
+    await giveBack(sql, [id]);
+    expect(await sql.execute("SELECT id FROM items")).toEqual([]);
   });
 });
 

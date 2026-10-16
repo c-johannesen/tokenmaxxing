@@ -224,11 +224,11 @@ export async function companies(sql: Sql): Promise<AdminCompany[]> {
 }
 
 /**
- * Deletes an account: its usage, activity, purchases, items, rewards, office, application, trade
- * offers and company seat (the company hands over or closes, as when leaving). Refused while they have
- * coins on a game that isn't settled, so no pot comes up short (furniture is paid for, not held). Their
- * `ledger` and `match_players` rows stay: other players' games add up with them, and ids are never
- * reused (`deleted_users`).
+ * Deletes an account: its usage, activity, purchases, items (those it dropped too), rewards, office,
+ * application, trade offers and company seat (the company hands over or closes, as when leaving).
+ * Refused while they have coins on a game that isn't settled, so no pot comes up short (furniture is
+ * paid for, not held). Their `ledger` and `match_players` rows stay: other players' games add up with
+ * them, and ids are never reused (`deleted_users`).
  */
 export async function deleteUser(sql: Sql, userId: number, now: number): Promise<Changed> {
   const u = await userById(sql, userId);
@@ -250,7 +250,11 @@ export async function deleteUser(sql: Sql, userId: number, now: number): Promise
   await sql.execute("DELETE FROM trades WHERE from_id = ? OR to_id = ?", userId, userId);
   for (const table of ["usage_daily", "activity_daily", "capped_daily", "purchases", "rewards", "offices"])
     await sql.execute(`DELETE FROM ${table} WHERE user_id = ?`, userId);
-  await sql.execute("DELETE FROM items WHERE owner_id = ?", userId);
+  await sql.execute(
+    "DELETE FROM items WHERE owner_id = ? OR (owner_id IS NULL AND dropped_by = ?)",
+    userId,
+    userId,
+  );
   await sql.execute("INSERT INTO deleted_users (id, name, at) VALUES (?, ?, ?)", userId, u.name, now);
   await sql.execute("DELETE FROM users WHERE id = ?", userId);
   return changed;
