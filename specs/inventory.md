@@ -240,3 +240,28 @@ Together, 4 / 5.
 - The backfill logs `[town] N items into the bag` the one time it runs.
 - Someone still wearing a level reward from before this lands can't `setLook` it again until their next sync
   grants it (every 2 minutes from the app).
+
+## As built, PR 2 (world and client)
+
+The world and client half of drops. Not wired yet: `take` doesn't call `town.pickUp` (a comment marks
+where it goes), and nothing calls `placeDrop` from the town (`town.drop`, the per-person cap and the
+sweeper are the next step, as is returning the drops of a deleted user, a closed company's building or
+a deleted owner's office through `removeDrops`).
+
+- `Drop`, `DROPS`, `setDrops`, `pieceOfDrop`, `dropName` and `dropCovers` are in `core/src/world.ts`, next
+  to `mapOf`. `mapOf` keeps each room's overlay until `setDrops` runs or the room's own map changes
+  (`setTown`, `setHq`, `setOffice` make a new one), so those don't need to call `setDrops`. The overlay
+  reuses `officeMap`, which now takes the map to write over.
+- A furniture drop's kind is `furn.<ch>` read through `FURNITURE`, so it works before PR 1 adds those ids
+  to `ITEMS`.
+- `placeDrop` returns the `Drop`, or `{ notice: "There's no room on the floor here." }` past 30 in the
+  room (or with no free tile), for the town to hand the row back and show the notice. It finds the tile
+  with `findSpot` (the game tables' finder), which also keeps drops off and around game tables in town.
+  Furniture lands on nobody's tile, besides not in a doorway or in front of one.
+- `take` returns `null` when there's nothing to take, `{ notice: "That's ada's floor." }` on someone
+  else's office floor, and `{ notice: "🎒 Took the Sofa.", drop }` otherwise: "the", since "a Shades"
+  reads wrong. On a drop and facing a blocking one, the one you're on wins.
+- The world tests for drops call the actions in-process (`world.config.actions`, as `match.test.ts`
+  does) with made-up item ids: the internal key never leaves the test server. They move to `town.drop`
+  once it exists.
+- Right-clicking a seat you're next to walks into it the usual way (sits, E on arrival) and then takes.

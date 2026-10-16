@@ -67,14 +67,18 @@ export function parseOffice(raw: unknown): Placed[] | null {
   return out;
 }
 
-/** An office: the template with its owner's furniture written over the floor. */
-export function officeMap(furniture: readonly Placed[]): GameMap {
-  const rows = MAPS.office.rows.map((r) => [...r]);
-  for (const p of furniture) for (let i = 0; i < (pieceOf(p.ch)?.w ?? 1); i++) rows[p.y]![p.x + i] = p.ch;
+/** An office: the template with its owner's furniture written over the floor (or any room's map: drops). */
+export function officeMap(furniture: readonly Placed[], base = MAPS.office): GameMap {
+  const rows = base.rows.map((r) => [...r]);
+  for (const p of furniture)
+    for (let i = 0; i < (pieceOf(p.ch)?.w ?? 1); i++)
+      if (base.contains(p.x + i, p.y)) rows[p.y - base.y0]![p.x + i - base.x0] = p.ch;
   return new GameMap(
-    "office",
-    MAPS.office.name,
+    base.id,
+    base.name,
     rows.map((r) => r.join("")),
+    base.x0,
+    base.y0,
   );
 }
 

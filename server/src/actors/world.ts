@@ -8,7 +8,7 @@ import {
   spotSize,
 } from "@tokenmaxxing/core/games/gather.ts";
 import type { GameId } from "@tokenmaxxing/core/games/types.ts";
-import { setTown, TOWN_SPAWN } from "@tokenmaxxing/core/maps.ts";
+import { LEGEND, setTown, TOWN_SPAWN } from "@tokenmaxxing/core/maps.ts";
 import {
   type Door,
   doorAt,
@@ -28,7 +28,10 @@ import {
   companyOfRoom,
   cupsLeft,
   DIRS,
+  type Drop,
   drinkCoffee,
+  dropCovers,
+  dropName,
   type Facing,
   type GameStatus,
   type Houses,
@@ -46,6 +49,7 @@ import {
   type PlayerPos,
   type PlayerState,
   type PlayerView,
+  pieceOfDrop,
   portal,
   type RoomId,
   restSpot,
@@ -53,6 +57,7 @@ import {
   type Snapshot,
   STEP_BURST,
   type StepResult,
+  setDrops,
   stepTarget,
   TICK_MS,
   takeStep,
@@ -102,6 +107,8 @@ interface WorldState {
   games?: Record<string, WorldGame>;
   /** Saved offices, by owner (optional, like games). No entry is a new one: `officeOf`. */
   offices?: Record<string, Office>;
+  /** What's on the floor, by id (optional, like games). Furniture is in its room's map too: `syncDrops`. */
+  drops?: Record<string, Drop>;
 }
 
 type ConnState = Caller & { joined?: boolean };
@@ -117,6 +124,8 @@ const COFFEE_LINES = [
   "☕☕☕☕☕☕ The machine refuses to make it any stronger. You vibrate anyway.",
 ];
 const CHAT_PER_MIN = 20;
+/** At most this many drops on one room's floor. */
+const DROPS_PER_ROOM = 30;
 const REST_CHECK_EVERY = 10; // ticks
 /** Bots take a step every this many ticks: a stroll. */
 const BOT_STEP_EVERY = 3;
@@ -215,6 +224,8 @@ export const world = actor({
     buildTown(c.state);
     for (const [id, o] of Object.entries(c.state.offices ?? {})) setOffice(Number(id), o.furniture);
     for (const id of Object.keys(c.state.companies)) buildHq(c.state, Number(id));
+    for (const room of new Set(Object.values(c.state.drops ?? {}).map((d) => d.room)))
+      syncDrops(c.state, room);
   },
   onDisconnect: (c, conn) => {
     const s = conn.state as ConnState;
@@ -343,6 +354,37 @@ export const world = actor({
       c.broadcast("info", info(p, c.vars.online.has(p.id)));
       const cups = Math.round(cupsLeft(p.coffeeUntil, now));
       return { notice: COFFEE_LINES[Math.min(cups, COFFEE_LINES.length) - 1]! };
+    },
+
+    /**
+     * G: the drop you're on (standing on a parcel or rug, sitting on a seat), else a piece nobody can be
+     * on that you face. Off an office floor, only its owner takes anything.
+     */
+    take: (c): null | { notice: string; drop?: Drop } => {
+      const userId = requireUser(c.conn.state);
+      const p = c.state.players[userId];
+      if (!p || (p.state !== "idle" && p.state !== "sit")) return null;
+      touch(c, p, Date.now());
+      const map = mapOf(p.room);
+      const [dx, dy] = DIRS[p.facing];
+      const [fx, fy] = [p.x + dx, p.y + dy];
+      const here = dropsIn(c.state, p.room);
+      const on = here.find((d) => dropCovers(d, p.x, p.y) && (p.state === "sit" || map.walkable(p.x, p.y)));
+      const d =
+        on ?? here.find((d) => dropCovers(d, fx, fy) && !map.walkable(fx, fy) && !map.kind(fx, fy).seat);
+      if (!d) return null;
+      const owner = ownerOfOffice(p.room);
+      if (owner !== null && owner !== userId)
+        return { notice: `That's ${c.state.players[owner]?.name ?? "someone"}'s floor.` };
+      delete c.state.drops![d.id];
+      syncDrops(c.state, p.room);
+      if (d === on && p.state === "sit") {
+        p.state = "idle";
+        c.vars.dirty.add(p.id);
+      }
+      sendToRoom(c, p.room, "pickup", { id: d.id });
+      // Next: `town.pickUp(d.id, userId)` puts it in the bag.
+      return { notice: `🎒 Took the ${dropName(d)}.`, drop: d };
     },
 
     say: async (c, rawText: unknown): Promise<void> => {
@@ -575,6 +617,58 @@ export const world = actor({
       for (const conn of c.conns.values()) {
         const s = conn.state as ConnState;
         if (s.kind === "user" && s.joined && s.userId === userId) conn.send("notice", notice);
+      }
+    },
+
+    /**
+     * From `town`: an item on the floor of the room its dropper is in. A parcel goes on their tile, or the
+     * nearest free one; furniture on the nearest free floor tile that isn't a doorway or in front of one.
+     * ponytail: no reachability check, as in offices.
+     */
+    placeDrop: (c, { id, item, by }: { id: number; item: string; by: number }): Drop | { notice: string } => {
+      requireInternal(c.conn.state);
+      const p = c.state.players[by];
+      const full = { notice: "There's no room on the floor here." };
+      const here = p ? dropsIn(c.state, p.room) : [];
+      if (!p || here.length >= DROPS_PER_ROOM) return full;
+      const map = mapOf(p.room);
+      const piece = pieceOfDrop({ item });
+      // One drop per tile; furniture lands on nobody, and not in anyone's way through a door.
+      const taken = new Set<string>();
+      for (const d of here) for (let i = 0; i < (pieceOfDrop(d)?.w ?? 1); i++) taken.add(`${d.x + i},${d.y}`);
+      if (piece) {
+        for (const o of Object.values(c.state.players)) if (o.room === p.room) taken.add(`${o.x},${o.y}`);
+        for (const [ch, kind] of Object.entries(LEGEND)) {
+          if (!kind.portal) continue;
+          for (const [x, y] of map.find(ch))
+            for (const [dx, dy] of Object.values(DIRS)) taken.add(`${x + dx},${y + dy}`);
+        }
+      }
+      const games = p.room === "town" ? Object.values(c.state.games ?? {}).map((g) => g.spot) : [];
+      const spot = findSpot(map, [p.x, p.y], piece?.w ?? 1, 1, games, taken);
+      if (!spot) return full;
+      const drop: Drop = { id, item, room: p.room, ...spot, by, at: Date.now() };
+      c.state.drops ??= {};
+      c.state.drops[drop.id] = drop;
+      syncDrops(c.state, p.room);
+      sendToRoom(c, p.room, "drop", drop);
+      return drop;
+    },
+
+    /** From `town`'s sweeper: drops gone back to their droppers. Anyone sitting on one stands up there. */
+    removeDrops: (c, ids: number[]): void => {
+      requireInternal(c.conn.state);
+      for (const id of ids) {
+        const d = c.state.drops?.[id];
+        if (!d) continue;
+        delete c.state.drops![id];
+        syncDrops(c.state, d.room);
+        for (const p of Object.values(c.state.players))
+          if (p.room === d.room && p.state === "sit" && dropCovers(d, p.x, p.y)) {
+            p.state = "idle";
+            c.vars.dirty.add(p.id);
+          }
+        sendToRoom(c, d.room, "pickup", { id });
       }
     },
 
@@ -933,8 +1027,19 @@ async function snapshot(
     furniture: owner === null ? null : officeOf(s, owner).furniture,
     owner: owner === null ? null : { id: owner, name: s.players[owner]?.name ?? "Someone" },
     doors: companyId === null ? [] : doorsOf(s, companyId),
+    drops: dropsIn(s, self.room),
   };
 }
+
+const dropsIn = (s: WorldState, room: RoomId): Drop[] =>
+  Object.values(s.drops ?? {}).filter((d) => d.room === room);
+
+/** A room's drops into its map (`mapOf`): dropped seats seat, the coffee machine pours, the rest blocks. */
+const syncDrops = (s: WorldState, room: RoomId): void =>
+  setDrops(
+    room,
+    dropsIn(s, room).map((d) => ({ ...d })),
+  );
 
 /** Someone's office; one never saved is new: `STARTER_OFFICE`, open. */
 const officeOf = (s: WorldState, userId: number): Office =>

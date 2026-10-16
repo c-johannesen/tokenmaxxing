@@ -3,6 +3,7 @@ import {
   CHAT_HISTORY,
   type ChatLine,
   type CompanyInfo,
+  type Drop,
   type Houses,
   type Moves,
   type Notice,
@@ -17,11 +18,13 @@ import {
   applyBubble,
   applyCallout,
   applyChat,
+  applyDrop,
   applyGame,
   applyGameOver,
   applyInfo,
   applyJump,
   applyMoves,
+  applyPickup,
   loadSnapshot,
   setCompanies,
   world,
@@ -121,6 +124,8 @@ export function connect(token: string): void {
   conn.on("game", (g: WorldGame) => applyGame(g));
   conn.on("gameOver", (e: { id: number; winners: number[] }) => applyGameOver(e.id, e.winners));
   conn.on("callout", (e: { id: number; userId: number | null; text: string }) => applyCallout(e));
+  conn.on("drop", (d: Drop) => applyDrop(d));
+  conn.on("pickup", (e: { id: number }) => applyPickup(e.id));
   conn.onError((err) => {
     if (isUnauthorized(err)) signedOut();
   });
