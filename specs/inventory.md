@@ -8,14 +8,19 @@ the floor for someone else to take; rewards show in the bag but never leave you.
 Decided:
 - **Rewards are not tradeable** and not droppable (a drop is a trade with extra steps). They show in the
   bag with a 🏅 mark and can be worn; nothing else.
-- **Picking up is not stepping**: a dropped sofa must be sittable where it lies.
+- **You take only what you stand on.** Stepping onto a drop does nothing by itself; G (or a click) takes it.
 - **Furniture is tradeable.** Furniture placed in your office is yours: nobody else can take it.
+- **Your office floor is yours too.** Anything dropped in your own office can be taken only by you.
 
-Difficulty, overall: **4 / 5.** Two PRs. The first (inventory, grants, trading from the bag, furniture into
-the bag) is medium: one new table with a backfill, every ownership check moved over, and the office editor
-becomes bag-driven. The second (drops) is the hard part: items change hands between two actors, dropped
-furniture changes the room's map for everyone, and nothing may be lost or duplicated. Scores per part at
-the end.
+One consequence of "stand on it": a drop is always a **parcel on a walkable tile**, never a usable thing.
+A dropped sofa is a parcel until someone places it in their office; nobody sits on it where it lies
+(nobody could stand on it to take it otherwise). That's Animal Crossing's rule, and it keeps dropped
+furniture out of the room maps, which is the single biggest simplification in this spec.
+
+Difficulty, overall: **3.5 / 5.** Two PRs. The first (inventory, grants, trading from the bag, furniture
+into the bag) is medium: one new table with a backfill, every ownership check moved over, and the office
+editor becomes bag-driven. The second (drops) is medium: items change hands between two actors, so it
+needs a handshake and a sweeper, but drops never touch a map. Scores per part at the end.
 
 ## What other games do about picking up
 
@@ -29,15 +34,16 @@ the end.
 | Path of Exile | Click each item | Anyone (with allocation rules) | Defended as "an active decision of what you're picking up"; PoE 2 added hold-to-click so loot doesn't hijack movement |
 | Diablo IV | Auto-loot in a radius | Instanced per player | The convenient end of the scale |
 
-Three patterns, then. **Walk-over** is for games where items are small and plentiful and nothing on the
-floor is usable (and it misbehaves over a laggy connection). **Face and press** is for deliberate, sparse
-pickups, and games with usable things on the floor separate "use" from "take" (Animal Crossing's A vs Y).
-**Click to take** is the mouse version of the same deliberate act, and the better games walk you there
-first. For a room with seats and a coffee machine, where E already means "use what you face", the Animal
-Crossing split is the one that fits: **E uses, G takes**, and a click walks you over and takes.
+Three patterns, then. **Walk-over** is for games where items are small and plentiful (and it misbehaves
+over a laggy connection). **Face and press** is for deliberate, sparse pickups, and games with usable
+things on the floor separate "use" from "take" (Animal Crossing's A vs Y). **Click to take** is the mouse
+version of the same deliberate act, and the better games walk you there first. What we decided is
+Animal Crossing's model exactly: walk onto the parcel, press a take key (**G**; E keeps meaning "use what
+you face"), or click it and your character walks onto it and takes. Dropped furniture is a parcel until
+placed, as there.
 
-The ownership rules we decided are the Animal Crossing and Habbo ones combined: placed furniture in
-your own office is yours; anything dropped anywhere else is loot for whoever takes it.
+The ownership rules are Animal Crossing's and Habbo's combined: placed furniture in your office is yours,
+your office floor is yours, and anything dropped anywhere else is loot for whoever stands on it.
 
 Sources: [Pokémon items](https://breezewiki.discard.no/pokemon/wiki/Item),
 [ACNH: visitors and placed vs dropped](https://www.gameslearningsociety.org/wiki/can-visitors-take-things-from-your-house-in-animal-crossing/),
@@ -62,16 +68,15 @@ Sources: [Pokémon items](https://breezewiki.discard.no/pokemon/wiki/Item),
 - **Furniture** lives in the bag. Your office lists what's placed; placing takes a row out of the bag
   (`placed = 1`), removing puts it back. Placing is free; buying costs. "Removing refunds nothing" becomes
   "removing keeps the piece". Only the owner edits an office, so placed furniture can't be taken.
-- **Dropping** puts one row on the floor of the room you're in, at your tile (or the nearest free floor
-  tile if you're seated). Small things (clothes, hats, glasses, pets) lie on a walkable tile and don't
-  block. **Dropped furniture is furniture**: it's written into the room's map like office pieces are, so
-  people sit on a dropped sofa and pour from a dropped coffee machine. A worn thing dropped comes off
-  your look.
-- **Taking:** press **G** facing a drop or standing on one, or click it (you walk there and take it).
-  Taking needs you adjacent to or on the tile; the server checks. Anyone can take any drop, including in
-  someone's office: an office's *placed* furniture is the owner's, a drop in it is loot.
+- **Dropping** puts one row on the floor of the room you're in, as a parcel on your tile (or the nearest
+  free floor tile if you're seated). Parcels never block and are never usable: a dropped sofa is a parcel
+  until someone places it in their office. One parcel per tile. A worn thing dropped comes off your look.
+- **Taking:** stand on the parcel and press **G**, or click it (you walk onto it and take it). The server
+  checks you're on the tile. Anyone can take a drop in town, the Inn or a company building. In an
+  office, only its owner can: a visitor's drop there becomes the owner's to take, or goes back to the
+  visitor after an hour like any unclaimed drop.
 - Unclaimed drops go back to the dropper after an hour. At most 5 live drops per person and 30 per room.
-  Dropping in a room that's full says so.
+  Dropping in a room that's full, or on a tile that already has a parcel, says so.
 
 ## Data
 
@@ -122,17 +127,15 @@ World state (`server/src/actors/world.ts`): `drops?: Record<string, Drop>` with
 - `town.drop(itemKind)` (`requireUser`): under `serial`, pick one unplaced row of that kind I own, refuse
   rewards (`not_tradeable`) and a sixth live drop (`SELECT COUNT(*) … WHERE dropped_by = ? AND owner_id IS
   NULL`); set `owner_id = NULL, dropped_by = me, dropped_at = now`; un-wear if worn; then
-  `world.placeDrop({ id, item, by })`. The world puts it on my tile (furniture: the nearest free floor
-  tile that keeps the room walkable, with the same no-reachability-check `ponytail` as offices), or
-  refuses past 30 with a notice, in which case the town returns the row at once.
-- `world.take()`: the drop I face or stand on, within one tile; remove it from state, send `pickup` to
-  the room, call `town.pickUp(dropId, userId)`: `UPDATE items SET owner_id = ?, dropped_by = NULL WHERE
-  id = ? AND owner_id IS NULL`. Zero rows updated means the sweeper got there first; the drop is already
-  gone from the world. Returns a `StepResult` notice: `🎒 Took a Duck.`
-- **Dropped furniture in the map:** `core` gets `DROPS = new Map<RoomId, Drop[]>()` and `setDrops(room,
-  drops)`; `mapOf(room)` overlays furniture drops (their `ch`) on the base map and caches per room until
-  `setDrops` runs again. `stepTarget`, `sit` and `drink` then just work. Both the world and the client
-  call `setDrops` from the snapshot and the `drop`/`pickup` events.
+  `world.placeDrop({ id, item, by })`. The world puts it on my tile, or the nearest free walkable tile if
+  I'm seated or my tile has a parcel; it refuses past 30 in the room with a notice, and the town then
+  returns the row at once.
+- `world.take()`: the drop on my tile, or nothing. In an `office:<owner>` room, only the owner
+  (`"That's ada's floor."` otherwise). Remove it from state, send `pickup` to the room, call
+  `town.pickUp(dropId, userId)`: `UPDATE items SET owner_id = ?, dropped_by = NULL WHERE id = ? AND
+  owner_id IS NULL`. Zero rows updated means the sweeper got there first; the drop is already gone from
+  the world. Returns a `StepResult` notice: `🎒 Took a Duck.`
+- Drops never touch a map: `stepTarget`, `sit`, `portal` and the office editor know nothing about them.
 - **Sweeper:** a town alarm every 10 minutes (`c.schedule`, as `arcade` uses) returns rows with
   `owner_id IS NULL AND dropped_at < now - 1h` to `dropped_by`, and tells the world `removeDrops(ids)`.
 - `Snapshot` gains `drops: Drop[]`; events `drop` (a Drop) and `pickup` (`{ id }`).
@@ -148,10 +151,11 @@ World state (`server/src/actors/world.ts`): `drops?: Record<string, Drop>` with
   longer charges; Remove returns to the bag. The "Not enough coins" line goes; "None left in your bag"
   takes its place when relevant.
 - **Trade panel:** "You give" lists bag kinds with counts, rewards and placed pieces excluded.
-- **Drops in the world** (`web/src/game/render.ts`): a parcel sprite for clothes, the pet's frame for
-  pets, furniture as itself from the map; a `sign` with the kind's name when you're within two tiles.
-  `G` calls `conn.take()`; clicking a drop walks you adjacent (`walkTo` with a `takeOnArrival` flag next
-  to `interactOnArrival` in `web/src/game/input.ts`) and takes. The ⓘ Controls overlay lists G.
+- **Drops in the world** (`web/src/game/render.ts`): one parcel sprite (a small box with a bow, drawn in
+  `web/src/art/objects.ts`), with the pet's frame instead for pets; a `sign` with the kind's name when
+  you stand on it or next to it. `G` calls `conn.take()`; clicking a drop walks you onto it (`walkTo` with
+  a `takeOnArrival` flag next to `interactOnArrival` in `web/src/game/input.ts`) and takes. In someone
+  else's office the sign reads `🔒 Duck` and G says whose floor it is. The ⓘ Controls overlay lists G.
 
 ## Tests
 
@@ -161,10 +165,11 @@ World state (`server/src/actors/world.ts`): `drops?: Record<string, Drop>` with
 - `server/test/town.test.ts`: `report` crossing 10B grants the top hat; `setLook` accepts a traded-in
   Duck; `drop` of a reward is refused, of a worn hat un-wears, of a sixth drop is refused; `pickUp` with a
   swept row updates nothing; `furnish` refuses more sofas than the bag holds and flips `placed`.
-- `server/test/world.test.ts`: a drop appears in the room snapshot; `take` from two tiles away is refused;
-  a colleague adjacent takes it and the dropper's bag loses it; the drop is gone for everyone; a second
-  take of the same id fails cleanly; a dropped sofa is sittable; a room at 30 drops refuses the 31st.
-- `core/test`: `mapOf` with furniture drops overlays and caches; `isTradeable` is false for rewards.
+- `server/test/world.test.ts`: a drop appears in the room snapshot; `take` from the next tile is refused;
+  a colleague standing on it takes it and the dropper's bag loses it; the drop is gone for everyone; a
+  second take of the same id fails cleanly; a visitor can't take a drop in the owner's office and the
+  owner can; a room at 30 drops refuses the 31st; a second drop on the same tile lands next to it.
+- `core/test`: `isTradeable` is false for rewards; `parseSide` refuses them.
 
 ## Difficulty
 
@@ -175,13 +180,13 @@ World state (`server/src/actors/world.ts`): `drops?: Record<string, Drop>` with
 | Trading from the bag | S | 2 | Simplifies `settleTrade`; removes the ledger trick |
 | Furniture into the bag, editor rework | M | 3 | `furnish` and the editor change meaning; a Shop tab |
 | Bag panel, Shop counts | S–M | 2 | New panel from existing pieces |
-| Drops, taking, dropped furniture in maps, sweeper | L | 4 | Two-actor handoff; room maps change live for everyone; caps and expiry; rendering and input |
+| Drops, taking, sweeper | M | 3 | Two-actor handoff, caps and expiry, one sprite, one key; no map changes |
 
-PR 1 (first five rows) is bigger than the trading feature was. PR 2 (drops) is bigger than offices.
-Together, 4 / 5.
+PR 1 (first five rows) is bigger than the trading feature was. PR 2 (drops) is about the size of trading.
+Together, 3.5 / 5.
 
 ## Open questions
 
-- Should drops in someone's *closed* office be allowed? A closed office only keeps visitors out; someone
-  already inside could leave junk. Default: allowed; the owner takes it like anyone.
 - The Inn: same 30-drop cap as any room, or lower, since everyone passes through? Default: the same.
+- Should a visitor be allowed to drop in someone else's office at all, given only the owner can take it
+  there? It's how you leave a gift on someone's floor, so default: yes.
