@@ -1,4 +1,4 @@
-import { type GameMap, setTown } from "@tokenmaxxing/core/maps.ts";
+import { type GameMap, setOffice, setTown } from "@tokenmaxxing/core/maps.ts";
 import {
   type ChatLine,
   type CompanyInfo,
@@ -7,6 +7,7 @@ import {
   type Houses,
   type Moves,
   mapOf,
+  ownerOfOffice,
   type PlayerInfo,
   type PlayerPos,
   type PlayerState,
@@ -59,6 +60,8 @@ export const world = {
   games: new Map<number, WorldGame>(),
   /** A line said at a game's table itself ("🤝 Draw"), shown over the table briefly. */
   tableBubbles: new Map<number, { text: string; until: number }>(),
+  /** In an office: whose it is. */
+  owner: null as Snapshot["owner"],
 };
 
 /** Someone's look: as seen in the world, or their default while they're not in it. */
@@ -95,7 +98,10 @@ export function loadSnapshot(s: Snapshot): void {
   const changedRoom = s.room !== world.room || world.selfId === 0;
   world.room = s.room;
   world.selfId = s.selfId;
+  world.owner = s.owner;
   setCompanies(s.companies);
+  const owner = ownerOfOffice(s.room);
+  if (owner !== null && s.furniture) setOffice(owner, s.furniture);
   showMap(s.room);
   const bubbles = new Map([...world.avatars].map(([id, a]) => [id, a.bubble]));
   world.avatars = new Map(
@@ -134,6 +140,8 @@ export function setCompanies(list: CompanyInfo[]): void {
 export function roomName(room: RoomId): string {
   if (room === "town") return "Town square";
   if (room === "inn") return "The Inn";
+  if (ownerOfOffice(room) !== null)
+    return room === world.room && world.owner ? `${world.owner.name}'s office` : "An office";
   const company = world.companies.get(Number(room.slice(3)));
   return company ? `${company.name}'s house` : "Company house";
 }

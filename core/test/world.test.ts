@@ -67,15 +67,22 @@ describe("portals", () => {
   const exit = { ch: "x", x: 0, y: 0 };
 
   test("your own house lets you in; others are locked; an empty one says so", () => {
-    expect(portal("town", door, 7, plots)).toEqual(roomEntry("hq:7"));
-    expect(portal("town", door, 8, plots)).toEqual({ notice: "🔒 Arox's house. Members only." });
-    expect("notice" in portal("town", door, 7, new Map())).toBe(true);
+    expect(portal("town", door, 7, plots, 1)).toEqual(roomEntry("hq:7"));
+    expect(portal("town", door, 8, plots, 1)).toEqual({ notice: "🔒 Arox's house. Members only." });
+    expect("notice" in portal("town", door, 7, new Map(), 1)).toBe(true);
   });
 
   test("leaving a house puts you outside its door; the Inn works for everyone", () => {
-    expect(portal("hq:7", exit, 7, plots)).toEqual({ room: "town", x, y: y + 1, facing: "down" });
-    expect(portal("town", { ch: "I", x: 13, y: 14 }, null, plots)).toEqual(roomEntry("inn"));
-    expect(portal("inn", exit, null, plots)).toEqual(outsideDoor("inn"));
+    expect(portal("hq:7", exit, 7, plots, 1)).toEqual({ room: "town", x, y: y + 1, facing: "down" });
+    expect(portal("town", { ch: "I", x: 13, y: 14 }, null, plots, 1)).toEqual(roomEntry("inn"));
+    expect(portal("inn", exit, null, plots, 1)).toEqual(outsideDoor("inn"));
+  });
+
+  test("the office door takes you to your own office; its exit to your own building, or the Inn", () => {
+    const [rx, ry] = MAPS.hq.find("R")[0]!;
+    expect(portal("hq:3", { ch: "R", x: rx, y: ry }, 3, plots, 5)).toEqual(roomEntry("office:5"));
+    expect(portal("office:7", exit, 3, plots, 5)).toEqual({ room: "hq:3", x: rx, y: ry + 1, facing: "down" });
+    expect(portal("office:7", exit, null, plots, 5)).toEqual(roomEntry("inn"));
   });
 });
 

@@ -8,7 +8,8 @@ import {
   spotSize,
 } from "@tokenmaxxing/core/games/gather.ts";
 import type { GameId } from "@tokenmaxxing/core/games/types.ts";
-import { setTown, TOWN_SPAWN } from "@tokenmaxxing/core/maps.ts";
+import { setOffice, setTown, TOWN_SPAWN } from "@tokenmaxxing/core/maps.ts";
+import { OFFICE_LEVEL, type Placed, STARTER_OFFICE } from "@tokenmaxxing/core/shop.ts";
 import {
   CHAT_HISTORY,
   type ChatLine,
@@ -28,6 +29,7 @@ import {
   mapOf,
   mentionsIn,
   type Notice,
+  ownerOfOffice,
   type Place,
   type PlayerInfo,
   type PlayerPos,
@@ -36,6 +38,7 @@ import {
   portal,
   type RoomId,
   restSpot,
+  roomEntry,
   type Snapshot,
   STEP_BURST,
   type StepResult,
@@ -63,7 +66,7 @@ import {
   type TokenCache,
   waitForTick,
 } from "./shared.ts";
-import type { PlayerCore } from "./town.ts";
+import type { Office, PlayerCore } from "./town.ts";
 
 interface WorldPlayer extends PlayerCore, Place {
   state: PlayerState;
@@ -86,6 +89,8 @@ interface WorldState {
   companies: Record<string, CompanyInfo>;
   /** Games on show in town. Optional: worlds from before games have none. */
   games?: Record<string, WorldGame>;
+  /** Saved offices, by owner (optional, like games). No entry is a new one: `officeOf`. */
+  offices?: Record<string, Office>;
 }
 
 type ConnState = Caller & { joined?: boolean };
@@ -192,10 +197,12 @@ export const world = actor({
       const seed = await main(c.client()).town.seed();
       for (const co of seed.companies) c.state.companies[co.id] = co;
       for (const p of seed.players) upsert(c.state, p, Date.now());
+      c.state.offices = seed.offices;
       c.state.seeded = true;
     }
     placeBots(c.state);
     buildTown(c.state);
+    for (const [id, o] of Object.entries(c.state.offices ?? {})) setOffice(Number(id), o.furniture);
   },
   onDisconnect: (c, conn) => {
     const s = conn.state as ConnState;
@@ -270,7 +277,9 @@ export const world = actor({
         return null;
       }
       if (target.kind === "blocked") return wasSeated ? correction(p) : null;
-      const dest = portal(p.room, target, p.companyId, plots(c.state));
+      if (target.ch === "R" && p.level < OFFICE_LEVEL)
+        return { notice: `🔒 Your own office opens at level ${OFFICE_LEVEL}.` };
+      const dest = portal(p.room, target, p.companyId, plots(c.state), p.id);
       if ("notice" in dest) return { notice: dest.notice };
       Object.assign(p, dest);
       return correction(p);
@@ -352,6 +361,25 @@ export const world = actor({
         const other = c.state.players[s.userId];
         if (other && other.room !== p.room && named.has(other.name)) conn.send("mention", line);
       }
+    },
+
+    /**
+     * From a player card: into their office, if they have one and it's open (your own always is).
+     * It bypasses their building's door on purpose: its exit leads into your own building.
+     */
+    visit: (c, targetId: unknown): StepResult => {
+      const userId = requireUser(c.conn.state);
+      const p = c.state.players[userId];
+      const owner = typeof targetId === "number" ? c.state.players[targetId] : undefined;
+      if (!p || p.state === "playing") return null;
+      if (!owner || owner.level < OFFICE_LEVEL || owner.companyId === null)
+        return { notice: "They don't have an office yet." };
+      if (owner.id !== userId && !officeOf(c.state, owner.id).open)
+        return { notice: `🔒 ${owner.name}'s office is closed.` };
+      touch(c, p, Date.now());
+      Object.assign(p, roomEntry(`office:${owner.id}`), { state: "idle" });
+      c.vars.dirty.add(p.id);
+      return correction(p);
     },
 
     /** After a game: back to where you were before it. */
@@ -463,9 +491,14 @@ export const world = actor({
       const p = upsert(c.state, core, Date.now());
       const online = c.vars.online.has(p.id);
       if (before !== undefined && before !== p.companyId) {
-        // Changed company: out of the old house, and resting players move to the new one.
+        // Changed company: out of the old house (and out of any office with no company at all),
+        // and resting players move to the new one.
         if (!online) rest(c.state, p, p.state === "working" ? "working" : "away");
-        else if (p.room.startsWith("hq:") && p.room !== `hq:${p.companyId}`) Object.assign(p, townSpawn());
+        else if (
+          (p.room.startsWith("hq:") && p.room !== `hq:${p.companyId}`) ||
+          (p.companyId === null && ownerOfOffice(p.room) !== null)
+        )
+          Object.assign(p, townSpawn());
         c.vars.dirty.add(p.id);
       }
       c.broadcast("info", info(p, online));
@@ -498,6 +531,16 @@ export const world = actor({
       delete c.state.companies[id];
       buildTown(c.state, c.vars.dirty);
       c.broadcast("companies", Object.values(c.state.companies));
+    },
+
+    /** From `town`: an office saved, opened or closed. Whoever is inside sees it; closing throws nobody out. */
+    setOffice: async (c, userId: number, furniture: Placed[], open: boolean): Promise<void> => {
+      requireInternal(c.conn.state);
+      c.state.offices ??= {};
+      c.state.offices[userId] = { furniture, open };
+      setOffice(userId, furniture);
+      for (const p of Object.values(c.state.players))
+        if (p.room === `office:${userId}`) await sendSnapshot(c, p);
     },
 
     /** From `town`: a line for one player's open tabs (a company application, a trade, an answer). */
@@ -816,6 +859,7 @@ async function snapshot(
   self: WorldPlayer,
   chat: Promise<ChatLine[]>,
 ): Promise<Snapshot> {
+  const owner = ownerOfOffice(self.room);
   return {
     room: self.room,
     selfId: self.id,
@@ -827,8 +871,14 @@ async function snapshot(
     chat: await chat,
     houses: self.room === "town" ? houses(s) : {},
     games: Object.values(s.games ?? {}),
+    furniture: owner === null ? null : officeOf(s, owner).furniture,
+    owner: owner === null ? null : { id: owner, name: s.players[owner]?.name ?? "Someone" },
   };
 }
+
+/** Someone's office; one never saved is new: `STARTER_OFFICE`, open. */
+const officeOf = (s: WorldState, userId: number): Office =>
+  s.offices?.[userId] ?? { furniture: [...STARTER_OFFICE], open: true };
 
 /** Everyone inside each company house, for drawing them through its walls from town. */
 function houses(s: WorldState): Houses {

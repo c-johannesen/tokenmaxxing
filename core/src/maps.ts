@@ -3,8 +3,9 @@
  * checks steps against them, so every tile is defined exactly once, here.
  * One character per tile; `LEGEND` says what it is.
  */
+import { type Placed, pieceOf } from "./shop.ts";
 
-export type MapId = "town" | "hq" | "inn";
+export type MapId = "town" | "hq" | "inn" | "office";
 type SeatKind = "bench" | "sofa" | "bed" | "chair";
 
 interface TileKind {
@@ -45,6 +46,7 @@ export const LEGEND: Record<string, TileKind> = {
   I: { name: "inn door", portal: true },
   x: { name: "exit", portal: true },
   D: { name: "door", portal: true },
+  R: { name: "office door", portal: true, text: "Your office." },
 };
 
 /**
@@ -289,6 +291,26 @@ export function setTown(plots: readonly number[]): GameMap {
   return MAPS.town;
 }
 
+/** An office: the template with its owner's furniture written over the floor. */
+export function officeMap(furniture: readonly Placed[]): GameMap {
+  const rows = MAPS.office.rows.map((r) => [...r]);
+  for (const p of furniture) for (let i = 0; i < (pieceOf(p.ch)?.w ?? 1); i++) rows[p.y]![p.x + i] = p.ch;
+  return new GameMap(
+    "office",
+    MAPS.office.name,
+    rows.map((r) => r.join("")),
+  );
+}
+
+/** Each owner's office map. ponytail: one process holds every office it has seen, like the town. */
+export const OFFICES = new Map<number, GameMap>();
+
+export function setOffice(userId: number, furniture: readonly Placed[]): GameMap {
+  const map = officeMap(furniture);
+  OFFICES.set(userId, map);
+  return map;
+}
+
 /** Where you arrive in town: the middle of the square. */
 export const TOWN_SPAWN: [number, number] = [9, 5];
 
@@ -297,7 +319,7 @@ export const MAPS: Record<MapId, GameMap> = {
   town: townMap([]),
   hq: new GameMap("hq", "Company house", [
     "WWWWWWWWWWWWWWWWWWWWWW",
-    "WWWWWWWWWWWWWWWWWWWWWW",
+    "WWWWWWWWWWWWWRWWWWWWWW",
     "Wkk_b_b_b_b_p__dddd_oW",
     "W______________cccc__W",
     "W____________________W",
@@ -322,5 +344,18 @@ export const MAPS: Record<MapId, GameMap> = {
     "W______________W",
     "Wp____________pW",
     "WWWWWWWxWWWWWWWW",
+  ]),
+  // Everyone's office, before their furniture goes in (officeMap). ponytail: one template; bigger
+  // offices per house tier would be an `OFFICE_SIZES` table.
+  office: new GameMap("office", "Office", [
+    "WWWWWWWWWWWW",
+    "W__________W",
+    "W__________W",
+    "W__________W",
+    "W__________W",
+    "W__________W",
+    "W__________W",
+    "W__________W",
+    "WWWWWxWWWWWW",
   ]),
 };

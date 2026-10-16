@@ -15,6 +15,7 @@ import { LookPicker } from "./LookPicker.tsx";
 import { MatchPanel } from "./Match.tsx";
 import { MiniBoard } from "./MiniBoard.tsx";
 import { Minimap } from "./Minimap.tsx";
+import { OfficePanel } from "./OfficePanel.tsx";
 import { BotCard, PlayerCard } from "./PlayerCard.tsx";
 import { Shop } from "./Shop.tsx";
 import { TradePanel, TradesPanel } from "./Trades.tsx";
@@ -162,6 +163,7 @@ function Dialog() {
 
 function Panel() {
   const panel = useHud((s) => s.panel);
+  const inMyOffice = useHud((s) => s.room === `office:${world.selfId}`);
   if (!panel) return null;
   switch (panel.kind) {
     case "leaderboard":
@@ -186,10 +188,17 @@ function Panel() {
       return <TradePanel userId={panel.userId} />;
     case "trades":
       return <TradesPanel />;
+    case "office":
+      return <OfficePanel />;
     case "menu":
       return (
         <Modal title="Menu">
           <nav className="menu">
+            {inMyOffice && (
+              <button type="button" onClick={() => hud.set({ panel: { kind: "office" } })}>
+                🛋 Furnish your office
+              </button>
+            )}
             <button type="button" onClick={() => hud.set({ panel: { kind: "look" } })}>
               🎨 Your character
             </button>

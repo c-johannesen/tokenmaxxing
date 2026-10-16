@@ -13,8 +13,9 @@ import type { RangeKey } from "@tokenmaxxing/core/range.ts";
 import { ITEMS } from "@tokenmaxxing/core/shop.ts";
 import type { Profile } from "@tokenmaxxing/server/registry";
 import { useEffect, useState } from "react";
+import { send } from "../game/input.ts";
 import { world } from "../game/world.ts";
-import { errorText, town } from "../net.ts";
+import { conn, errorText, town } from "../net.ts";
 import { hud } from "../store.ts";
 import { Computers } from "./Computers.tsx";
 import { AvatarImage, Modal, Pills } from "./ui.tsx";
@@ -76,6 +77,12 @@ export function PlayerCard({ userId }: { userId: number }) {
   const status = doing(userId);
   const today = p.daily.at(-1)?.tokens ?? 0;
   const reward = ITEMS.find((i) => i.level !== undefined && i.level > p.level);
+  const mine = userId === world.selfId;
+  const visit = () => {
+    hud.set({ panel: null });
+    world.portalPending = true;
+    send(conn.visit(userId));
+  };
   return (
     <Modal
       title={
@@ -134,7 +141,7 @@ export function PlayerCard({ userId }: { userId: number }) {
             <p className="muted">Freelancer</p>
           )}
           <p className="muted">{compact(p.lifetimeTokens)} tokens all time</p>
-          {userId !== world.selfId && (
+          {!mine && (
             <p>
               <button type="button" onClick={() => hud.set({ panel: { kind: "newTable", invite: userId } })}>
                 🎮 Invite to a game
@@ -144,6 +151,12 @@ export function PlayerCard({ userId }: { userId: number }) {
               </button>
             </p>
           )}
+          {p.office && (mine || p.office === "open") && (
+            <button type="button" onClick={visit}>
+              🚪 {mine ? "My office" : "Visit office"}
+            </button>
+          )}
+          {p.office === "closed" && !mine && <p className="muted">🔒 Office closed</p>}
         </div>
       </div>
       <Pills value={range} options={RANGES} onChange={setRange} />

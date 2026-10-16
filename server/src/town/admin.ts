@@ -224,17 +224,18 @@ export async function companies(sql: Sql): Promise<AdminCompany[]> {
 }
 
 /**
- * Deletes an account: its usage, activity, purchases, application, trade offers and company seat
- * (the company hands over or closes, as when leaving). Refused while they have coins on a game
- * that isn't settled, so no pot comes up short. Their `ledger` and `match_players` rows stay: other
- * players' games add up with them, and ids are never reused (`deleted_users`).
+ * Deletes an account: its usage, activity, purchases, office, application, trade offers and company
+ * seat (the company hands over or closes, as when leaving). Refused while they have coins on a game
+ * that isn't settled, so no pot comes up short (furniture is paid for, not held). Their `ledger` and
+ * `match_players` rows stay: other players' games add up with them, and ids are never reused
+ * (`deleted_users`).
  */
 export async function deleteUser(sql: Sql, userId: number, now: number): Promise<Changed> {
   const u = await userById(sql, userId);
-  // A trade that moved an item sums to minus its price for good: that's not a game.
+  // A trade that moved an item, or furniture, sums to minus its price for good: that's not a game.
   const playing = await one(
     sql,
-    `SELECT ref FROM ledger WHERE kind NOT IN ('admin', 'trade')
+    `SELECT ref FROM ledger WHERE kind NOT IN ('admin', 'trade', 'furniture')
        AND ref IN (SELECT ref FROM ledger WHERE user_id = ?)
      GROUP BY ref HAVING SUM(amount) < 0 LIMIT 1`,
     userId,
@@ -246,7 +247,7 @@ export async function deleteUser(sql: Sql, userId: number, now: number): Promise
   const changed = await leave(sql, userId);
   await withdraw(sql, userId);
   await sql.execute("DELETE FROM trades WHERE from_id = ? OR to_id = ?", userId, userId);
-  for (const table of ["usage_daily", "activity_daily", "capped_daily", "purchases"])
+  for (const table of ["usage_daily", "activity_daily", "capped_daily", "purchases", "offices"])
     await sql.execute(`DELETE FROM ${table} WHERE user_id = ?`, userId);
   await sql.execute("INSERT INTO deleted_users (id, name, at) VALUES (?, ?, ?)", userId, u.name, now);
   await sql.execute("DELETE FROM users WHERE id = ?", userId);
