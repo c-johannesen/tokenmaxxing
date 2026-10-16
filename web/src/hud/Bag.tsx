@@ -22,6 +22,7 @@ export function Bag() {
 
   const drop = (item: string) =>
     run(async () => {
+      setNotice(null); // a refused one shows only its error
       setNotice((await town.drop(item)).notice);
       setBag(await town.bag());
       await refreshMe(); // a worn one comes off

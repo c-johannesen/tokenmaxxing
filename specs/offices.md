@@ -177,3 +177,5 @@ already adds `ledgerSum`, so nothing else changes for balances.
 - A never-saved office reads as `STARTER_OFFICE` from `mapOf`, on the server and in the client alike.
 - `deleteUser` ignores `furniture` refs in its unsettled-game check: they sum to minus the price for good.
 - The office code is in `core/src/office.ts`, not `shop.ts` and `maps.ts`; the template stays in `MAPS`.
+- Superseded by `specs/inventory.md`: furniture comes from the bag and placing it is free, so there's no
+  `officeCost`, no `furniture` ledger kind and no ledger row on save.

@@ -155,7 +155,7 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   `purchases` (coins spent, per kind), `items` (one row per copy anyone holds), `rewards` (level rewards
   handed out), `ledger` (coins held and paid by games, and traded), `trades` (one open offer per sender),
   `offices`, `match_players` (one row per player per finished game), `deleted_users`, `admin_log`.
-- Accounts: `signUp` (20 an hour per IP, 1,000 an hour in all), `rename`, `setLook` (refuses items you don't hold), `me`.
+- Accounts: `signUp` (20 an hour per IP, 1,000 an hour in all), `rename` (10 an hour), `setLook` (refuses items you don't hold), `me`.
 - Companies: create (on a plot the owner picks: any empty block next to the town, see `frontier` in
   `core/src/maps.ts`), leave, kick, rename, `setWebsite`. One company per person, at most 50 members. The
   earliest joiner takes over from a leaving owner; the last one out closes the company. The town is built from
@@ -169,10 +169,11 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 - Coins: `wallet`, `buy`, `bag`; for `arcade`: `hold`, `pay`, `refund`, `recordMatch`. Games: `gameBoard`.
 - Trades: `offerTrade` (10 an hour; a new offer replaces your old one), `trades`, `acceptTrade`,
   `declineTrade`, `withdrawTrade`. See *Coins and the shop*.
-- Offices: `office`, `setOffice` (places pieces from the bag), `setOfficeOpen`.
-- Drops: `drop` takes one of a kind out of your bag (not a reward or a placed piece; at most 5 of yours on
-  the floor at once) and asks `world.placeDrop` to put it where you are; a full room says so, and the row
-  comes straight back. On the floor a row has `owner_id` NULL, with `dropped_by` and `dropped_at`.
+- Offices: `office` (your own), `setOffice` (places pieces from the bag), `setOfficeOpen`; 30 changes a
+  minute, since each one sends the office (and, opened or closed, its building) to everyone inside.
+- Drops: `drop` (30 a minute) takes one of a kind out of your bag (not a reward or a placed piece; at most
+  5 of yours on the floor at once) and asks `world.placeDrop` to put it where you are; a full room says so,
+  and the row comes straight back. On the floor a row has `owner_id` NULL, with `dropped_by` and `dropped_at`.
   `pickUp` (from `world.take`) puts it in the taker's bag, unless it's gone home already. **The sweeper**
   is a cron alarm (`sweep`, every 10 minutes; it outlives restarts and wakes the town): drops nobody took
   in an hour come off the floor (`world.removeDrops`) and go back to their droppers. A closed company's
@@ -187,7 +188,7 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   refused while they have coins in an unsettled game. Their `ledger` and `match_players` rows stay, and
   `deleted_users` keeps new ids above theirs, so nobody inherits them.
 - Every change a player could see is pushed to `world` (`town/sync.ts`); `world` asks `town` only to put a
-  taken drop in the bag (`pickUp`).
+  taken drop in the bag (`pickUp`), and for everyone (`seed`) when it starts from nothing.
 
 **`world["main"]`**: everything live, in actor state, with chat in SQLite (last 200 lines per room).
 - A 10 Hz tick sends each room its `moves`, and head counts (`occupancy`) and who's inside each house
@@ -204,7 +205,8 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   it off the floor first, then asks `town.pickUp`; if that call fails, it goes back down.
 - **Resting.** Closing the last tab sends you to your bed; offline with agents active in the last 10 minutes, to
   your desk. Company members rest in their house, others at the Inn. Your spot is remembered: the next `join` puts
-  you back there. Online with 3 minutes without input, you just doze where you are (`dozing`, drawn as a "z") until
+  you back there, unless it's a house you've left or someone's office that closed (`back` after a game too).
+  Online with 3 minutes without input, you just doze where you are (`dozing`, drawn as a "z") until
   your next input, so a town left open on a second screen keeps showing what's going on.
 
 **`arcade["main"]`** and **`match[id]`**: the mini games; see *Games*.

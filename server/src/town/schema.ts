@@ -45,6 +45,9 @@ export async function migrate(sql: Sql): Promise<void> {
   await sql.execute(`CREATE TABLE IF NOT EXISTS purchases (
     user_id INTEGER NOT NULL, item TEXT NOT NULL, price INTEGER NOT NULL, at INTEGER NOT NULL,
     PRIMARY KEY (user_id, item)) WITHOUT ROWID`);
+  // Decided before it's made: `items` can empty out again later, and the backfill mustn't run twice.
+  const fresh =
+    (await sql.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'items'")).length === 0;
   // One row per copy anyone holds. `owner_id` is NULL while it's on the floor (`dropped_by` and
   // `dropped_at` say whose and since when); `placed = 1` while it's in its owner's office.
   await sql.execute(`CREATE TABLE IF NOT EXISTS items (
@@ -74,9 +77,9 @@ export async function migrate(sql: Sql): Promise<void> {
   await sql.execute(`CREATE TABLE IF NOT EXISTS offices (
     user_id INTEGER PRIMARY KEY, furniture TEXT NOT NULL, open INTEGER NOT NULL DEFAULT 1,
     updated_at INTEGER NOT NULL)`);
-  // Into the bag, once: a purchase row was the item (a traded one already belonged to the receiver),
-  // and each office piece was paid for, so it's a placed row.
-  if ((await sql.execute("SELECT 1 FROM items LIMIT 1")).length === 0) {
+  // Into the bag, once, when `items` is new: a purchase row was the item (a traded one already belonged
+  // to the receiver), and each office piece was paid for, so it's a placed row.
+  if (fresh) {
     await sql.execute("INSERT INTO items (owner_id, item, at) SELECT user_id, item, at FROM purchases");
     await sql.execute(
       `INSERT INTO items (owner_id, item, at, placed)

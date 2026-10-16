@@ -23,18 +23,26 @@ export function TradePanel({ userId }: { userId: number }) {
   const { error, busy, run } = useRun();
   useEffect(() => {
     void town.wallet().then((w) => hud.set({ wallet: w }));
-    void town
-      .bag()
-      .then((b) =>
-        setMine(
-          Object.fromEntries(
-            b
-              .filter((r) => isTradeable(r.item) && r.count > r.placed)
-              .map((r) => [r.item, r.count - r.placed]),
-          ),
-        ),
-      );
-    void town.tradeables(userId).then(setThem, (e) => setFailed(errorText(e)));
+    const load = (failed: (e: unknown) => void) => {
+      void town
+        .bag()
+        .then(
+          (b) =>
+            setMine(
+              Object.fromEntries(
+                b
+                  .filter((r) => isTradeable(r.item) && r.count > r.placed)
+                  .map((r) => [r.item, r.count - r.placed]),
+              ),
+            ),
+          failed,
+        );
+      void town.tradeables(userId).then(setThem, failed);
+    };
+    load((e) => setFailed(errorText(e)));
+    // ponytail: a poll, like `TradesPanel`'s, so a trade settled meanwhile shows here too.
+    const id = setInterval(() => load(() => {}), 10_000);
+    return () => clearInterval(id);
   }, [userId]);
   if (failed) return <Modal title="🔁 Trade">{failed}</Modal>;
   if (!wallet || !mine || !them) return <Modal title="🔁 Trade">Loading…</Modal>;

@@ -284,6 +284,23 @@ describe("world", () => {
     expect(again.snap).toMatchObject({ room, furniture: [...STARTER_OFFICE] });
     for (const c of [g, again]) await c.conn.dispose();
   });
+
+  test("an office that closed while you slept isn't where you wake up", async () => {
+    const owner = await signUp("shut");
+    await owner.town.createCompany("Shutters");
+    await veteran(owner);
+    const guest = await signUp("shut");
+    const g = await connect(guest.token);
+    expect(await g.conn.visit(owner.userId)).toMatchObject({ room: `office:${owner.userId}` });
+    // Closing the tab remembers the office...
+    await g.conn.dispose();
+    await Bun.sleep(300);
+    await owner.town.setOfficeOpen(false);
+    // ...but it's closed now, so they're up in their bed at the Inn.
+    const again = await connect(guest.token);
+    expect(again.snap.room).toBe("inn");
+    await again.conn.dispose();
+  });
 });
 
 // MARK: Drops

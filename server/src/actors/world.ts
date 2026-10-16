@@ -448,7 +448,9 @@ export const world = actor({
       const userId = requireUser(c.conn.state);
       const p = c.state.players[userId];
       if (!p || p.state === "playing" || !p.back) return null;
-      Object.assign(p, p.back, { state: "idle" });
+      // Somewhere they can't be any more: they stay where the game left them.
+      if (canReturn(c.state, p, p.back)) Object.assign(p, p.back);
+      p.state = "idle";
       p.back = null;
       c.vars.dirty.add(p.id);
       return correction(p);
@@ -795,18 +797,25 @@ function rest(s: WorldState, p: WorldPlayer, state: "away" | "working"): void {
   Object.assign(p, restSpot(room, state, taken), { state });
 }
 
+/** Whether `p` may go back to `to`: not a house they've left, not someone's closed office. */
+function canReturn(s: WorldState, p: WorldPlayer, to: Place): boolean {
+  const house = companyOfRoom(to.room);
+  const owner = ownerOfOffice(to.room);
+  return (
+    (house === null || house === p.companyId) && (owner === null || owner === p.id || officeOf(s, owner).open)
+  );
+}
+
 /**
  * Gets up a resting player: back where they were before resting, if they can
- * still be there (not a house they've left), else up where they lie. False if
- * they weren't resting.
+ * still be there (`canReturn`), else up where they lie. False if they weren't
+ * resting.
  */
 function wake(s: WorldState, p: WorldPlayer): boolean {
   if (p.state !== "away" && p.state !== "working") return false;
   const back = p.back;
   p.back = null;
-  const house = back ? companyOfRoom(back.room) : null;
-  const canGo = back && (house === null || house === p.companyId);
-  if (!canGo) {
+  if (!back || !canReturn(s, p, back)) {
     p.state = "idle";
     return true;
   }
