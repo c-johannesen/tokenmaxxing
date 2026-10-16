@@ -128,10 +128,10 @@ function Stats() {
         type="button"
         className="icon"
         title="Bag"
-        aria-label="Bag"
+        aria-label={wallet ? `Bag: ${wallet.items} things` : "Bag"}
         onClick={() => hud.set({ panel: { kind: "bag" } })}
       >
-        🎒
+        🎒{wallet && ` ${wallet.items}`}
       </button>
       <button
         type="button"

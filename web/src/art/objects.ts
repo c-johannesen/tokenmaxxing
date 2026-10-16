@@ -260,25 +260,6 @@ const coffee = cached(
     }),
 );
 
-/** Something dropped on the floor (a wearable): a small box with a bow. */
-export const parcel = cached(
-  () => "parcel",
-  () =>
-    bake(12, 11, (p) => {
-      p.rect(1, 9, 10, 2, C.shadow);
-      p.rect(1, 3, 10, 7, C.ink);
-      p.rect(2, 4, 8, 5, C.fabric);
-      p.rect(2, 4, 8, 1, C.screen);
-      p.rect(5, 3, 2, 7, C.flowerYellow);
-      // The bow.
-      p.rect(2, 0, 3, 3, C.ink);
-      p.rect(7, 0, 3, 3, C.ink);
-      p.px(3, 1, C.flowerYellow);
-      p.px(8, 1, C.flowerYellow);
-      p.rect(5, 1, 2, 2, C.flowerYellow);
-    }),
-);
-
 const at = (canvas: HTMLCanvasElement, dx = 0, dy = TILE - canvas.height): Placed => ({ canvas, dx, dy });
 
 /** Maps are fixed, so each map's objects are worked out once (the render loop asks every frame). */

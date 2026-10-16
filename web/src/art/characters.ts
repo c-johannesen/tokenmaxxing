@@ -1,3 +1,4 @@
+import type { Item } from "@tokenmaxxing/core/shop.ts";
 import type { Facing, Look, PlayerState } from "@tokenmaxxing/core/world.ts";
 import { C, HAIRS, OUTFITS, PANTS, SKINS } from "./palette.ts";
 import { bake, cached, type Palette } from "./pixels.ts";
@@ -388,6 +389,24 @@ export const characterFrame = cached(
       if (view !== "up")
         p.grid(GLASSES[look.glasses]?.[view] ?? [], GLASSES_COLORS[look.glasses] ?? {}, 0, 5, flip);
       p.grid(HATS[look.hat]?.[view] ?? [], HAT_COLORS[look.hat] ?? {}, 0, 0, flip);
+    });
+  },
+);
+
+/**
+ * A hat, glasses or outfit on its own, as it lies on the floor and sits in the bag: as tall as the
+ * thing. An outfit is the top of the body, hands left out and the trousers' row as its hem.
+ */
+export const itemFrame = cached(
+  (item: Item) => item.id,
+  (item: Item) => {
+    const { slot, index: i } = item;
+    if (slot === "hat") return bake(16, HATS[i]!.down.length, (p) => p.grid(HATS[i]!.down, HAT_COLORS[i]!));
+    if (slot === "glasses") return bake(16, 3, (p) => p.grid(GLASSES[i]!.down, GLASSES_COLORS[i]!));
+    const [c, shade] = OUTFITS[i] ?? OUTFITS[0]!;
+    return bake(16, 4, (p) => {
+      p.grid(BODIES.down.stand.slice(0, 4), { o: C.ink, c, C: shade, p: C.ink });
+      if (i === 12) p.grid(RACK.down, RACK_COLORS);
     });
   },
 );

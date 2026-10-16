@@ -1,18 +1,10 @@
 import { compact } from "@tokenmaxxing/core/format.ts";
 import { BLOCK_W } from "@tokenmaxxing/core/maps.ts";
 import { itemById } from "@tokenmaxxing/core/shop.ts";
-import {
-  cupsLeft,
-  dropName,
-  houseTier,
-  JUMP_MS,
-  ownerOfOffice,
-  pieceOfDrop,
-  TILE,
-} from "@tokenmaxxing/core/world.ts";
+import { cupsLeft, houseTier, JUMP_MS, TILE } from "@tokenmaxxing/core/world.ts";
 import { house, inn } from "../art/buildings.ts";
-import { characterFrame, lookPalette, poseFor, sleeperFrame } from "../art/characters.ts";
-import { chairBack, objectAt, parcel, sortY } from "../art/objects.ts";
+import { characterFrame, itemFrame, lookPalette, poseFor, sleeperFrame } from "../art/characters.ts";
+import { chairBack, objectAt, sortY } from "../art/objects.ts";
 import { C } from "../art/palette.ts";
 import { PET_H, petFrame } from "../art/pets.ts";
 import { drawWaterGlints } from "../art/tiles.ts";
@@ -125,27 +117,17 @@ export function render(canvas: HTMLCanvasElement, now: number): void {
     labels.push(() => sign(g, sx, sy, text, dpr, d.userId === world.selfId, 1.9 * TILE * scale));
   }
 
-  // Drops: furniture is in the map; a wearable is a parcel, a pet itself. What it is shows when you're
-  // on it or next to it, with a 🔒 on someone else's office floor.
-  const owner = ownerOfOffice(world.room);
+  // Drops: furniture is in the map; a pet or a wearable lies there as itself.
   for (const d of world.drops) {
-    const piece = pieceOfDrop(d);
-    const w = piece?.w ?? 1;
     const kind = itemById(d.item);
-    const sprite = piece
-      ? null
-      : ((kind?.slot === "pet" ? petFrame(kind.index, false, false) : null) ?? parcel());
+    if (!kind || kind.slot === "furniture") continue;
+    const sprite = kind.slot === "pet" ? petFrame(kind.index, false, false) : itemFrame(kind);
     if (sprite)
       items.push({
         y: d.y * TILE + TILE / 2,
         draw: () =>
           g.drawImage(sprite, d.x * TILE + (TILE - sprite.width) / 2, (d.y + 1) * TILE - sprite.height - 1),
       });
-    if (!me || Math.abs(me.y - d.y) > 1 || me.x < d.x - 1 || me.x > d.x + w) continue;
-    const top = d.y * TILE + Math.min(0, objectAt(map, d.x, d.y)?.dy ?? 0);
-    const [sx, sy] = toScreen((d.x + w / 2) * TILE, top - 2);
-    const text = `${owner !== null && owner !== world.selfId ? "🔒 " : ""}${dropName(d)}`;
-    labels.push(() => sign(g, sx, sy, text, dpr, false));
   }
 
   drawGames(g, items, labels, toScreen, now, dpr);

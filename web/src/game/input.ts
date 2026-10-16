@@ -9,7 +9,7 @@ import {
   TILE,
   WALK_STEP_MS,
 } from "@tokenmaxxing/core/world.ts";
-import { conn } from "../net.ts";
+import { conn, town } from "../net.ts";
 import { chatBeside, hud } from "../store.ts";
 import { camera, zoom } from "./camera.ts";
 import { gameHits } from "./games.ts";
@@ -80,7 +80,7 @@ export function bindInput(canvas: HTMLCanvasElement): void {
         else interact();
         return;
       case "g":
-        send(conn.take());
+        take();
         return;
       case "enter":
         e.preventDefault();
@@ -159,7 +159,7 @@ export function bindInput(canvas: HTMLCanvasElement): void {
     const y = Math.floor(((e.clientY * camera.dpr) / camera.scale + camera.y) / TILE);
     const me = self();
     if (!me || !dropAt(x, y)) return;
-    if (x === me.x && y === me.y) return void send(conn.take());
+    if (x === me.x && y === me.y) return void take();
     walkTo(x, y);
     // A seat is sat on first; anything else is only taken.
     interactOnArrival &&= world.map.kind(x, y).seat !== undefined;
@@ -220,7 +220,7 @@ export function updateSelf(now: number): void {
     }
     if (takeOnArrival) {
       takeOnArrival = false;
-      send(conn.take());
+      take();
     }
     return;
   }
@@ -243,6 +243,16 @@ export function updateSelf(now: number): void {
   if (target.kind === "portal") world.portalPending = true;
   else beginStep(me, target.x, target.y, running ? RUN_STEP_MS : WALK_STEP_MS);
   send(conn.step(dir));
+}
+
+/** G, or a right-click: take what's there. It goes in the bag, so the wallet's count moves. */
+function take(): void {
+  send(
+    conn.take().then((r) => {
+      if (r?.drop) void town.wallet().then((wallet) => hud.set({ wallet }));
+      return r;
+    }),
+  );
 }
 
 /** Space: a hop, standing or walking. Everyone in the room sees it. */
