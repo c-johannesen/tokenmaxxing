@@ -226,8 +226,8 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
 - Only days from the world day you signed up count, for pay and for podium places: a first sync backfills
   old logs, and those days would otherwise pay out (and win podiums nobody else was around for).
 - Balances aren't stored: they're worked out from `usage_daily` minus `purchases`, so a late sync still pays.
-- Four daily quests (`core/src/quests.ts`) pay up to 14 more a day: 500M tokens, 5 agents at once, 2 hours of
-  agents running, 2 PRs. They're worked out from `usage_daily` and `activity_daily` too, so nothing is stored.
+- Two daily quests (`core/src/quests.ts`) pay up to 7 more a day: 5 agents at once, and 2 hours of
+  agents running. They're worked out from `activity_daily`, so nothing is stored.
 - The catalogue (`core/src/shop.ts`): 4 outfits, 3 glasses, 3 hats, 5 pets and the 11 pieces of furniture
   (`furn.<ch>`), 10 to 1,500 coins. Items are worn through `Look` (`outfit` ≥ 8, `glasses`, `hat`, `pet`).
   Pets follow their owner in the client.

@@ -5,7 +5,8 @@ and they use nothing but the rollups the town already keeps.
 
 ## Rules
 
-- **The same four quests every day.** No rotation, no pool.
+- **The same two quests every day.** No rotation, no pool. (Four shipped first; "Burn 500M tokens" and
+  "Open 2 pull requests" were cut on 2026-10-16, so a day pays at most 7.)
 - **Nothing is stored.** Whether a quest is done is worked out from `usage_daily` and `activity_daily` for
   that day, the way coins are worked out from usage (`server/src/town/coins.ts:31`). Only days from the
   day you signed up count, same rule as coins; a late sync still pays.
@@ -14,10 +15,8 @@ and they use nothing but the rollups the town already keeps.
 
 | Id | Text | Coins | Check on the day's facts |
 |---|---|---|---|
-| `tokens` | Burn 500M tokens | 5 | `tokens >= 500e6` |
 | `parallel` | Run 5 agents at once | 5 | `peakAgents >= 5` |
 | `hours` | Keep agents running for 2 hours | 2 | `activeBuckets >= 24` |
-| `prs` | Open 2 pull requests | 2 | `prs >= 2` |
 
 ## Data
 

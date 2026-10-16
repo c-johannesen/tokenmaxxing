@@ -94,7 +94,7 @@ export async function wallet(sql: Sql, userId: number, now: number): Promise<Wal
   // ponytail: one more query per call for the quests, like the rest of the wallet.
   const activity = await all<{ day: string } & Omit<DayFacts, "tokens">>(
     sql,
-    `SELECT day, peak_agents AS peakAgents, active_buckets AS activeBuckets, prs
+    `SELECT day, peak_agents AS peakAgents, active_buckets AS activeBuckets
      FROM activity_daily WHERE user_id = ? AND day >= ?`,
     userId,
     from,
@@ -168,7 +168,7 @@ export async function balances(sql: Sql, now: number): Promise<Map<number, numbe
   for (const d of days) add(d.userId, coinsForTokens(d.tokens));
   const activity = await all<{ userId: number; day: string } & Omit<DayFacts, "tokens">>(
     sql,
-    `SELECT user_id AS userId, day, peak_agents AS peakAgents, active_buckets AS activeBuckets, prs
+    `SELECT user_id AS userId, day, peak_agents AS peakAgents, active_buckets AS activeBuckets
      FROM activity_daily JOIN json_each(?) s ON user_id = CAST(s.key AS INTEGER) AND day >= s.value`,
     firstDay,
   );
