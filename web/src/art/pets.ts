@@ -164,6 +164,36 @@ const PETS: (Pet | null)[] = [
     ],
     pal: { o: C.ink, w: "#f4f1ea", k: "#3a3540", n: C.ink },
   },
+  // Singularity orb (level 30): a tiny black hole with a glowing ring, floating off the ground.
+  {
+    frames: [
+      [
+        "............",
+        "....oooo....",
+        "...oppppo...",
+        "..opkkkkpo..",
+        "wwwkkkkkkwww",
+        "..wpkkkkpw..",
+        "...oppppo...",
+        "....oooo....",
+        "............",
+        "............",
+      ],
+      [
+        "....oooo....",
+        "...oppppo...",
+        "..opkkkkpo..",
+        "wwwkkkkkkwww",
+        "..wpkkkkpw..",
+        "...oppppo...",
+        "....oooo....",
+        "............",
+        "............",
+        "............",
+      ],
+    ],
+    pal: { o: C.ink, p: "#9b6fd6", k: "#14101f", w: "#ffd27a" },
+  },
 ];
 
 export const PET_W = 12;

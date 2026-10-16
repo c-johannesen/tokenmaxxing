@@ -71,6 +71,10 @@ export function Shop() {
                 <button type="button" onClick={run(() => wear({ ...me.look, [item.slot]: item.index }))}>
                   Wear
                 </button>
+              ) : item.level !== undefined ? (
+                <button type="button" disabled>
+                  🔒 Lv {item.level}
+                </button>
               ) : (
                 <button
                   type="button"

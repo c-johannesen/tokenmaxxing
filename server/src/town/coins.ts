@@ -1,8 +1,9 @@
+import { levelFor } from "@tokenmaxxing/core/format.ts";
 import { addDays, dayKey } from "@tokenmaxxing/core/range.ts";
-import { coinsForTokens, type Item, PODIUM_COINS } from "@tokenmaxxing/core/shop.ts";
+import { coinsForTokens, type Item, levelItems, PODIUM_COINS } from "@tokenmaxxing/core/shop.ts";
 import { UserError } from "rivetkit";
 import { all, type Sql } from "../actors/shared.ts";
-import { TOKENS } from "./users.ts";
+import { TOKENS, tokensIn } from "./users.ts";
 
 export interface Wallet {
   balance: number;
@@ -10,7 +11,7 @@ export interface Wallet {
   today: number;
   /** Days finished in the top 3, newest first (the last 30 days). */
   wins: { day: string; place: number; coins: number }[];
-  /** Shop item ids. */
+  /** Shop item ids: bought, and earned by level. */
   owned: string[];
 }
 
@@ -61,11 +62,12 @@ export async function wallet(sql: Sql, userId: number, now: number): Promise<Wal
   const earned =
     days.reduce((n, d) => n + coinsForTokens(d.tokens), 0) + wins.reduce((n, w) => n + w.coins, 0);
   const since = addDays(today, -29);
+  const lifetime = (await tokensIn(sql, [userId])).get(userId) ?? 0;
   return {
     balance: earned - (spent ?? 0) + (await ledgerSum(sql, userId)),
     today: coinsForTokens(days.find((d) => d.day === today)?.tokens ?? 0),
     wins: wins.filter((w) => w.day >= since),
-    owned: await ownedItems(sql, userId),
+    owned: [...(await ownedItems(sql, userId)), ...levelItems(levelFor(lifetime)).map((i) => i.id)],
   };
 }
 

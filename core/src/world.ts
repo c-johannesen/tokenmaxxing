@@ -56,10 +56,10 @@ export const LOOK_OPTIONS: Record<keyof Look, number> = {
   style: 4,
   skin: 4,
   hair: 6,
-  outfit: 12,
+  outfit: 13,
   glasses: 4,
-  hat: 4,
-  pet: 6,
+  hat: 5,
+  pet: 7,
 };
 /** Looks saved before the shop have no extras. */
 const EXTRAS = { glasses: 0, hat: 0, pet: 0 };
