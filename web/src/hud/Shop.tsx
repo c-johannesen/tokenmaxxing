@@ -4,9 +4,10 @@ import { ITEMS, type Item, PODIUM_COINS } from "@tokenmaxxing/core/shop.ts";
 import type { Look } from "@tokenmaxxing/core/world.ts";
 import type { BagRow } from "@tokenmaxxing/server/registry";
 import { useEffect, useRef, useState } from "react";
+import { itemFrame } from "../art/characters.ts";
 import { objectAt } from "../art/objects.ts";
 import { C } from "../art/palette.ts";
-import { PET_H, PET_W, petFrame } from "../art/pets.ts";
+import { petFrame } from "../art/pets.ts";
 import { refreshMe, town } from "../net.ts";
 import { hud, useHud } from "../store.ts";
 import { AvatarImage, Modal, Pills, useRun } from "./ui.tsx";
@@ -132,10 +133,11 @@ export function WearButton({
   );
 }
 
-/** An item as it looks: on me, the pet, or the piece. */
-export function ItemImage({ item, look }: { item: Item; look: Look }) {
-  if (item.slot === "pet") return <PetImage pet={item.index} />;
+/** An item as it looks: on me (or `bare`, on its own), the pet, or the piece. */
+export function ItemImage({ item, look, bare }: { item: Item; look: Look; bare?: boolean }) {
+  if (item.slot === "pet") return <SpriteImage sprite={petFrame(item.index, false, false)} stand />;
   if (item.slot === "furniture") return <PieceImage ch={FURNITURE[item.index]!.ch} />;
+  if (bare) return <SpriteImage sprite={itemFrame(item)} />;
   return <AvatarImage look={{ ...look, [item.slot]: item.index }} scale={4} />;
 }
 
@@ -158,14 +160,22 @@ function PieceImage({ ch, scale = 2 }: { ch: string; scale?: number }) {
   return <canvas ref={ref} width={32 * scale} height={32 * scale} className="avatar" />;
 }
 
-function PetImage({ pet, scale = 4 }: { pet: number; scale?: number }) {
+/** A sprite at 4× in a 16×16 box: in the middle, or standing on the bottom (a pet). */
+function SpriteImage({ sprite, stand }: { sprite: HTMLCanvasElement | null; stand?: boolean }) {
+  const scale = 4;
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const g = ref.current?.getContext("2d");
-    const frame = petFrame(pet, false, false);
-    if (!g || !frame) return;
+    if (!g || !sprite) return;
     g.imageSmoothingEnabled = false;
-    g.drawImage(frame, ((16 - PET_W) / 2) * scale, (16 - PET_H) * scale, PET_W * scale, PET_H * scale);
-  }, [pet, scale]);
+    const { width: w, height: h } = sprite;
+    g.drawImage(
+      sprite,
+      ((16 - w) / 2) * scale,
+      (stand ? 16 - h : (16 - h) / 2) * scale,
+      w * scale,
+      h * scale,
+    );
+  }, [sprite, stand]);
   return <canvas ref={ref} width={16 * scale} height={16 * scale} className="avatar" />;
 }

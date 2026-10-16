@@ -24,6 +24,8 @@ export interface Wallet {
   wins: { day: string; place: number; coins: number }[];
   /** Item ids I hold, one of each kind: what I can wear or trade. */
   owned: string[];
+  /** How many things are in my bag, rewards included. */
+  items: number;
   /** Today's quests, and which are done so far. */
   quests: { id: string; text: string; coins: number; done: boolean }[];
 }
@@ -122,6 +124,7 @@ export async function wallet(sql: Sql, userId: number, now: number): Promise<Wal
     today: coinsForTokens(todays.tokens) + questCoins(todays),
     wins: wins.filter((w) => w.day >= since),
     owned: await ownedItems(sql, userId),
+    items: (await one<{ n: number }>(sql, "SELECT COUNT(*) AS n FROM items WHERE owner_id = ?", userId))!.n,
     quests: QUESTS.map(({ done, ...q }) => ({ ...q, done: done(todays) })),
   };
 }

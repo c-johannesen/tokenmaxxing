@@ -306,6 +306,7 @@ describe("drops", () => {
     for (let i = 0; i < 4; i++) await a.town.drop("furn.=");
     await expect(a.town.drop("furn.=")).rejects.toMatchObject({ code: "too_many" });
     expect(await a.town.bag()).toEqual([{ item: "furn.=", count: 1 }]);
+    expect((await a.town.wallet()).items).toBe(1);
   });
 });
 

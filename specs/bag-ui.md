@@ -1,4 +1,4 @@
-# The bag at the bottom, and items that look like themselves
+# The bag as a grid, and items that look like themselves
 
 Four client changes from playing with the inventory. No rules change.
 
@@ -30,30 +30,26 @@ item: `itemFrame` scaled up for wearables, the pet frame for pets, the piece for
 try-on (the whole character wearing it) as it is: that's a preview, not the bag. A `bare` prop on
 `ItemImage`, or a small `BagImage` next to it, whichever is fewer lines.
 
-## 4. The bag lives at the bottom of the screen, and opens upward as a grid
+## 4. The bag counts what you hold, and shows it as a grid
 
-- **The button:** `🎒 12` at the bottom centre of the screen, where `12` is how many things you hold
-  (every row in your bag, rewards included, nothing on a floor). The top bar's 🎒 button goes; the Menu
-  entry stays and opens the same drawer.
+The chat and the minimap own the bottom of the screen, so the bag stays where it is.
+
+- **The button:** the top bar's 🎒, next to the coins, reads `🎒 12`, where `12` is how many things you
+  hold (every row in your bag, rewards included, nothing on a floor). The Menu entry stays.
 - **The count:** `Wallet` gains `items: number` (one `COUNT(*)` of rows you own in
   `server/src/town/coins.ts`), so it refreshes wherever the wallet already does (every sync, every 30 s,
-  after a buy, a trade, a drop). Also refresh the wallet after a successful take (`G` / right-click in
-  `web/src/game/input.ts`).
-- **The drawer:** clicking the button opens the bag as a panel that slides up from the bottom centre
-  (same width rule as `.dialog`: between the chat on the left and the minimap on the right), not a modal
-  in the middle. Items in a **grid** of square cells: the item's image, a small `×n` count in a corner, 🏅
-  on rewards, a ring on what you're wearing. Clicking a cell selects it and shows its name and actions in a
-  strip at the top of the drawer: **Wear** / **Take off**, and **Drop** (or **Drop here** in your own
-  office) for tradeable kinds. Escape or the button closes it. Empty: "Nothing yet." with a link to the Shop.
-- **The dialog line** (`.dialog`, `bottom: 24px` in `hud.css:270`) moves up above the bag button so the two
-  don't overlap.
-- The drawer is the existing `{ kind: "bag" }` panel, rendered as a drawer instead of a `Modal`; keys and
-  clicks behave as they do for any open panel today.
+  after a buy, a trade). Also refresh the wallet after a drop from the bag and after a successful take
+  (`G` / right-click in `web/src/game/input.ts`).
+- **The grid:** the bag opens as today's `{ kind: "bag" }` panel (the `Modal`), but its contents are a
+  **grid** of square cells: the item's image, a small `×n` count in a corner, 🏅 on rewards, a ring on what
+  you're wearing. Clicking a cell selects it and shows its name and actions in a strip at the top of the
+  panel: **Wear** / **Take off**, and **Drop** (or **Drop here** in your own office) for tradeable kinds.
+  Empty: "Nothing yet." with a link to the Shop.
 
 ## Done when
 
 - `bun run typecheck`, `bun run lint`, `bun run test` pass (the `Wallet.items` count gets one assertion in
   `server/test/ledger.test.ts` or `town.test.ts`).
 - Looked at in a browser: a dropped hat, glasses and outfit on the floor; the bag button and its count; the
-  drawer open with a grid; a hat in the grid without a character under it.
+  bag open with a grid; a hat in the grid without a character under it.
 - One commit on `feat/netstationen`, no attribution lines.
