@@ -4,18 +4,8 @@
  */
 import type { Seat, Spot } from "./games/gather.ts";
 import type { BoardRow, GameId } from "./games/types.ts";
-import {
-  blockOf,
-  doorOf,
-  type GameMap,
-  MAPS,
-  type MapId,
-  OFFICES,
-  plotId,
-  setOffice,
-  TOWN_SPAWN,
-} from "./maps.ts";
-import { type Placed, STARTER_OFFICE } from "./shop.ts";
+import { blockOf, doorOf, type GameMap, MAPS, type MapId, plotId, TOWN_SPAWN } from "./maps.ts";
+import { OFFICES, type Placed, STARTER_OFFICE, setOffice } from "./office.ts";
 
 export const TILE = 16;
 /** Client animation time per step; the server only enforces the running pace. */

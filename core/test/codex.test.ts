@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1236,6 +1237,7 @@ describe("replayed token_count records", () => {
 });
 
 describe("listCodexFiles", () => {
+  // The list is real paths, and macOS's tmpdir() is /var/…, a link to /private/var/…: homes are real paths too.
   async function withHome(home: string, fn: () => Promise<void>, sqliteHome?: string) {
     const prev = process.env.CODEX_HOME;
     const prevSqlite = process.env.CODEX_SQLITE_HOME;
@@ -1263,7 +1265,7 @@ describe("listCodexFiles", () => {
   }
 
   it("includes archived rollouts, which the apps move out of sessions/", async () => {
-    const home = await mkdtemp(join(tmpdir(), "codex-home-"));
+    const home = realpathSync(await mkdtemp(join(tmpdir(), "codex-home-")));
     const live = join(home, "sessions", "2026", "10", "05", "rollout-a.jsonl");
     const archived = join(home, "archived_sessions", "rollout-b.jsonl");
     for (const f of [live, archived]) {
@@ -1276,7 +1278,7 @@ describe("listCodexFiles", () => {
   });
 
   it("reads rollout files the state database points at, and does not invent tokens from tokens_used", async () => {
-    const home = await mkdtemp(join(tmpdir(), "codex-home-"));
+    const home = realpathSync(await mkdtemp(join(tmpdir(), "codex-home-")));
     const outside = await mkdtemp(join(tmpdir(), "codex-outside-"));
     const sqliteHome = await mkdtemp(join(tmpdir(), "codex-sqlite-"));
     const live = join(home, "sessions", "2026", "10", "05", "rollout-a.jsonl");
@@ -1312,7 +1314,7 @@ describe("listCodexFiles", () => {
   });
 
   it("keeps session rollouts when the state database has no threads table", async () => {
-    const home = await mkdtemp(join(tmpdir(), "codex-home-"));
+    const home = realpathSync(await mkdtemp(join(tmpdir(), "codex-home-")));
     const live = join(home, "sessions", "rollout-a.jsonl");
     await mkdir(join(live, ".."), { recursive: true });
     await writeFile(live, "");

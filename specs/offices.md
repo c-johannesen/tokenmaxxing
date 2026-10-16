@@ -168,3 +168,12 @@ already adds `ledgerSum`, so nothing else changes for balances.
 
 - None. Visiting an open office bypasses the building's members-only door on purpose: a visitor exits into
   *their own* building, so nothing leaks.
+
+## As built
+
+- The editor opens with E facing a wall of your own office, or from the menu, not from the door: a door
+  can't be faced, a step goes through it. The first time you walk in, a dialog says so.
+- Saving writes one ledger row for the whole cost, not one per piece.
+- A never-saved office reads as `STARTER_OFFICE` from `mapOf`, on the server and in the client alike.
+- `deleteUser` ignores `furniture` refs in its unsettled-game check: they sum to minus the price for good.
+- The office code is in `core/src/office.ts`, not `shop.ts` and `maps.ts`; the template stays in `MAPS`.

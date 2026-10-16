@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { BOTS } from "@tokenmaxxing/core/bots.ts";
 import { MAPS } from "@tokenmaxxing/core/maps.ts";
-import { STARTER_OFFICE } from "@tokenmaxxing/core/shop.ts";
+import { STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
 import {
   type ChatLine,
   cupsLeft,
@@ -11,7 +11,7 @@ import {
   route,
   type Snapshot,
 } from "@tokenmaxxing/core/world.ts";
-import { admit, as, event, eventually, signUp, veteran } from "./rivet.ts";
+import { admin, admit, as, event, eventually, signUp, veteran } from "./rivet.ts";
 
 async function connect(token: string) {
   const conn = as(token).world.connect();
@@ -229,6 +229,14 @@ describe("world", () => {
     expect((await guest.town.profile(owner.userId, "7d")).office).toBe("closed");
     const o = await connect(owner.token);
     expect(await o.conn.visit(owner.userId)).toMatchObject({ room });
-    for (const c of [g, o]) await c.conn.dispose();
+    await o.conn.dispose();
+
+    // Deleted, their office goes from the world too; the guest still inside sees a new one.
+    await admin().adminSetCoins(owner.userId, 100);
+    await owner.town.setOffice([...STARTER_OFFICE, { ch: "s", x: 1, y: 1 }]);
+    await admin().adminDeleteUser(owner.userId);
+    const again = await connect(guest.token);
+    expect(again.snap).toMatchObject({ room, furniture: [...STARTER_OFFICE] });
+    for (const c of [g, again]) await c.conn.dispose();
   });
 });

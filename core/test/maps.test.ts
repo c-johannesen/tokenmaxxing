@@ -5,13 +5,12 @@ import {
   type GameMap,
   LEGEND,
   MAPS,
-  officeMap,
   plotBlock,
   plotId,
   TOWN_SPAWN,
   townMap,
 } from "../src/maps.ts";
-import { STARTER_OFFICE } from "../src/shop.ts";
+import { officeMap, STARTER_OFFICE } from "../src/office.ts";
 import { roomEntry } from "../src/world.ts";
 
 /** Tiles you can walk onto or stand next to (to sit, read or open a door) from (x, y). */

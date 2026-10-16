@@ -1,5 +1,5 @@
 import { isTradeable, itemById, type Side, TRADE_COINS_CAP } from "@tokenmaxxing/core/shop.ts";
-import type { Profile, Trade } from "@tokenmaxxing/server/registry";
+import type { Trade } from "@tokenmaxxing/server/registry";
 import { useEffect, useState } from "react";
 import { errorText, refreshMe, town } from "../net.ts";
 import { hud, useHud } from "../store.ts";
@@ -13,7 +13,7 @@ const sideText = (s: Side): string =>
 /** Offering someone a trade, from their card: coins and items each way. */
 export function TradePanel({ userId }: { userId: number }) {
   const wallet = useHud((s) => s.wallet);
-  const [them, setThem] = useState<Profile | null>(null);
+  const [them, setThem] = useState<{ name: string; owned: string[] } | null>(null);
   const [give, setGive] = useState<Side>({ coins: 0, items: [] });
   const [want, setWant] = useState<Side>({ coins: 0, items: [] });
   const [sent, setSent] = useState(false);
@@ -21,7 +21,7 @@ export function TradePanel({ userId }: { userId: number }) {
   const { error, busy, run } = useRun();
   useEffect(() => {
     void town.wallet().then((w) => hud.set({ wallet: w }));
-    void town.profile(userId, "today").then(setThem, (e) => setFailed(errorText(e)));
+    void town.tradeables(userId).then(setThem, (e) => setFailed(errorText(e)));
   }, [userId]);
   if (failed) return <Modal title="🔁 Trade">{failed}</Modal>;
   if (!wallet || !them) return <Modal title="🔁 Trade">Loading…</Modal>;

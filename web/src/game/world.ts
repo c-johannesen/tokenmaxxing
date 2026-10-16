@@ -1,4 +1,5 @@
-import { type GameMap, setOffice, setTown } from "@tokenmaxxing/core/maps.ts";
+import { type GameMap, setTown } from "@tokenmaxxing/core/maps.ts";
+import { setOffice } from "@tokenmaxxing/core/office.ts";
 import {
   type ChatLine,
   type CompanyInfo,
@@ -93,6 +94,8 @@ const avatarOf = (v: PlayerView, now: number, warp: boolean): Avatar => ({
 
 export const self = (): Avatar | undefined => world.avatars.get(world.selfId);
 
+const OFFICE_HINT_KEY = "tokenmaxxing.officeHint";
+
 export function loadSnapshot(s: Snapshot): void {
   const now = performance.now();
   const changedRoom = s.room !== world.room || world.selfId === 0;
@@ -115,11 +118,19 @@ export function loadSnapshot(s: Snapshot): void {
   world.portalPending = false;
   world.houses = s.houses;
   world.games = new Map(s.games.map((g) => [g.id, g]));
+  // The first time in your own office, how to furnish it.
+  const hint = changedRoom && s.room === `office:${s.selfId}` && !localStorage.getItem(OFFICE_HINT_KEY);
+  if (hint) localStorage.setItem(OFFICE_HINT_KEY, "1");
   hud.set({
     room: s.room,
     occupancy: s.occupancy,
     chat: s.chat,
-    ...(changedRoom ? { banner: { text: roomName(s.room), at: Date.now() }, dialog: null } : {}),
+    ...(changedRoom
+      ? {
+          banner: { text: roomName(s.room), at: Date.now() },
+          dialog: hint ? "Press E on a wall to furnish your office." : null,
+        }
+      : {}),
   });
 }
 

@@ -133,3 +133,12 @@ open the right panel (`web/src/hud/Hud.tsx:240` opens `company` on every click t
 
 - Should the coin cap be higher than a stake's 500? Trades aren't a bet, so a bigger cap is harmless; 500
   just keeps a fat-finger from emptying a wallet.
+
+## As built
+
+- `acceptTrade(fromId, at)` takes the offer's `at`, so an offer swapped meanwhile isn't accepted unseen.
+- `settleTrade` deletes the offer inside its transaction, so it can't settle twice.
+- `deleteUser` ignores `trade` refs in its unsettled-game check: an item's ref sums to minus its price.
+- Arcade toasts carry no `open`.
+- Both panels live in `web/src/hud/Trades.tsx`.
+- The trade panel lists their items from `town.tradeables(userId)`; `Profile` has no `owned`.

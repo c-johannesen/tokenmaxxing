@@ -8,8 +8,8 @@ import {
   spotSize,
 } from "@tokenmaxxing/core/games/gather.ts";
 import type { GameId } from "@tokenmaxxing/core/games/types.ts";
-import { setOffice, setTown, TOWN_SPAWN } from "@tokenmaxxing/core/maps.ts";
-import { OFFICE_LEVEL, type Placed, STARTER_OFFICE } from "@tokenmaxxing/core/shop.ts";
+import { setTown, TOWN_SPAWN } from "@tokenmaxxing/core/maps.ts";
+import { OFFICE_LEVEL, OFFICES, type Placed, STARTER_OFFICE, setOffice } from "@tokenmaxxing/core/office.ts";
 import {
   CHAT_HISTORY,
   type ChatLine,
@@ -507,6 +507,9 @@ export const world = actor({
     /** From `town`, when an admin deletes an account: out of the world, and their tabs closed. */
     removePlayer: (c, userId: number): void => {
       requireInternal(c.conn.state);
+      // Their office goes too; anyone inside stays until they leave.
+      delete c.state.offices?.[userId];
+      OFFICES.delete(userId);
       const p = c.state.players[userId];
       if (!p) return;
       sendToRoom(c, p.room, "moves", { room: p.room, join: [], m: [], leave: [userId] } satisfies Moves);

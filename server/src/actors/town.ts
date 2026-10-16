@@ -1,13 +1,12 @@
 import { frontier } from "@tokenmaxxing/core/maps.ts";
+import { OFFICE_LEVEL, parseOffice, STARTER_OFFICE } from "@tokenmaxxing/core/office.ts";
 import { isRangeKey } from "@tokenmaxxing/core/range.ts";
 import {
   emptySide,
+  isTradeable,
   itemById,
   itemsIn,
-  OFFICE_LEVEL,
-  parseOffice,
   parseSide,
-  STARTER_OFFICE,
   TRADE_COINS_CAP,
   TRADE_ITEMS_CAP,
 } from "@tokenmaxxing/core/shop.ts";
@@ -52,6 +51,8 @@ import {
   type Office,
   officeOf,
   offices,
+  ownedIds,
+  ownedItems,
   type PayKind,
   pay,
   refund,
@@ -268,7 +269,7 @@ export const town = actor({
       const userId = requireUser(c.conn.state);
       const look = parseLook(rawLook);
       if (!look) throw new UserError("Unknown look.", { code: "invalid_look" });
-      const owned = new Set((await wallet(c.db, userId, Date.now())).owned);
+      const owned = new Set(await ownedIds(c.db, userId));
       if (itemsIn(look).some((i) => !owned.has(i.id)))
         throw new UserError("Buy it in the shop first.", { code: "not_owned" });
       await c.db.execute("UPDATE users SET look = ? WHERE id = ?", JSON.stringify(look), userId);
@@ -492,6 +493,14 @@ export const town = actor({
 
     withdrawTrade: async (c): Promise<void> => {
       await c.db.execute("DELETE FROM trades WHERE from_id = ?", requireUser(c.conn.state));
+    },
+
+    /** What `userId` could trade away, for the trade panel. */
+    tradeables: async (c, targetId: unknown): Promise<{ name: string; owned: string[] }> => {
+      requireUser(c.conn.state);
+      if (typeof targetId !== "number") throw new UserError("Unknown player.", { code: "not_found" });
+      const u = await userById(c.db, targetId);
+      return { name: u.name, owned: (await ownedItems(c.db, u.id)).filter(isTradeable) };
     },
 
     /** Someone's office: what's in it, whether it's open, and what having one takes (level, company). */

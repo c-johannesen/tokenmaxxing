@@ -278,6 +278,7 @@ function NoticeToast() {
 /** My level went up while I was here; the first level after load is just where I started. */
 function LevelToast() {
   const level = useHud((s) => s.stats?.level);
+  const company = useHud((s) => s.me?.company);
   const seen = useRef<number | undefined>(undefined);
   const [up, setUp] = useState<{ from: number; to: number; at: number } | null>(null);
   useEffect(() => {
@@ -299,7 +300,8 @@ function LevelToast() {
       }}
     >
       ⬆️ Level {up.to} · {levelTitle(up.to)}
-      {reward && ` · You unlocked the ${reward.name}${reward.level === 10 ? " and your own office" : ""}`}
+      {reward && ` · You unlocked the ${reward.name}`}
+      {reward?.level === 10 && (company ? " and your own office" : " · Join a company for your own office")}
     </button>
   );
 }
