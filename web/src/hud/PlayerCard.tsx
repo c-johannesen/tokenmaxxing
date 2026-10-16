@@ -1,3 +1,4 @@
+import { BADGES } from "@tokenmaxxing/core/badges.ts";
 import { BOTS } from "@tokenmaxxing/core/bots.ts";
 import { compact, hoursText, levelAt, levelTitle, plural, usd } from "@tokenmaxxing/core/format.ts";
 import type { RangeKey } from "@tokenmaxxing/core/range.ts";
@@ -86,6 +87,18 @@ export function PlayerCard({ userId }: { userId: number }) {
             Next: Lv{p.level + 1} {levelTitle(p.level + 1)} in{" "}
             {compact(levelAt(p.level + 1) - p.lifetimeTokens)} tokens
           </p>
+          {p.badges.length > 0 && (
+            <ul className="badges">
+              {p.badges.map((b) => {
+                const next = BADGES.find((d) => d.id === b.id)?.tiers[b.tier];
+                return (
+                  <li key={b.id} className="badge" title={next && `${next.label} next`}>
+                    {b.emoji} {b.label}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
           {p.company ? (
             <p>
               <button

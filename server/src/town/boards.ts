@@ -1,3 +1,4 @@
+import { type Badge, badgesFor, streakOf } from "@tokenmaxxing/core/badges.ts";
 import { levelFor, levelTitle } from "@tokenmaxxing/core/format.ts";
 import { addDays, dayKey, type RangeKey, rangeDays } from "@tokenmaxxing/core/range.ts";
 import { type Brand, houseTier, type Look } from "@tokenmaxxing/core/world.ts";
@@ -14,9 +15,10 @@ import {
   totals,
   type UsageRow,
 } from "../stats.ts";
+import { podiumDays } from "./coins.ts";
 import { COMPANY_COLS, type CompanyRow, companyById, companyInfos } from "./companies.ts";
 import { type GameStats, gameStats } from "./games.ts";
-import { lookOf, tokensIn, USER_COLS, type UserRow, userById } from "./users.ts";
+import { lookOf, TOKENS, tokensIn, USER_COLS, type UserRow, userById } from "./users.ts";
 
 export interface BoardPlayer extends Totals {
   rank: number;
@@ -82,6 +84,7 @@ export interface Profile {
   daily: Daily[];
   /** All time; null for someone who never finished a game. */
   games: GameStats | null;
+  badges: Badge[];
 }
 
 /** The HUD's corner: my numbers today, and today's top 5 (with me pinned below when I'm not in it). */
@@ -189,6 +192,29 @@ export async function profile(sql: Sql, userId: number, range: RangeKey, now: nu
   const level = levelFor(lifetime);
   const co = u.companyId === null ? undefined : await companyById(sql, u.companyId);
   const company = co ? { id: co.id, name: co.name } : null;
+  const games = await gameStats(sql, userId);
+  // Badges. ponytail: four small queries per profile; fine for a card, cache per user if the card gets polled.
+  const days = await all<{ day: string; tokens: number }>(
+    sql,
+    `SELECT day, SUM(${TOKENS}) AS tokens FROM usage_daily WHERE user_id = ? GROUP BY day`,
+    userId,
+  );
+  const best = await one<{ peakAgents: number | null; prs: number | null }>(
+    sql,
+    "SELECT MAX(peak_agents) AS peakAgents, SUM(prs) AS prs FROM activity_daily WHERE user_id = ?",
+    userId,
+  );
+  const badges = badgesFor({
+    streak: streakOf(new Set(days.filter((d) => d.tokens > 0).map((d) => d.day)), dayKey(now)),
+    bestDay: Math.max(0, ...days.map((d) => d.tokens)),
+    podiums: (await podiumDays(sql, userId, now)).length,
+    peakAgents: best?.peakAgents ?? 0,
+    prs: best?.prs ?? 0,
+    wins: games?.wins ?? 0,
+    biggestPot: games?.biggestPot ?? 0,
+    // An owner is always a member (`leave` hands over), so their own company says it.
+    founder: co?.ownerId === userId,
+  });
   return {
     userId,
     name: u.name,
@@ -203,7 +229,8 @@ export async function profile(sql: Sql, userId: number, range: RangeKey, now: nu
       .map((r) => ({ model: r.model, tokens: rowTokens(r), costUsd: rowCost(pricing, r), turns: r.turns }))
       .sort((a, b) => b.tokens - a.tokens),
     daily,
-    games: await gameStats(sql, userId),
+    games,
+    badges,
   };
 }
 
