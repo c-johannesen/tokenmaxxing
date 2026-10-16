@@ -1,7 +1,16 @@
 import { BADGES } from "@tokenmaxxing/core/badges.ts";
 import { BOTS } from "@tokenmaxxing/core/bots.ts";
-import { compact, hoursText, levelAt, levelTitle, plural, usd } from "@tokenmaxxing/core/format.ts";
+import {
+  compact,
+  hoursText,
+  levelAt,
+  levelTitle,
+  MAX_LEVEL,
+  plural,
+  usd,
+} from "@tokenmaxxing/core/format.ts";
 import type { RangeKey } from "@tokenmaxxing/core/range.ts";
+import { ITEMS } from "@tokenmaxxing/core/shop.ts";
 import type { Profile } from "@tokenmaxxing/server/registry";
 import { useEffect, useState } from "react";
 import { world } from "../game/world.ts";
@@ -66,6 +75,7 @@ export function PlayerCard({ userId }: { userId: number }) {
   const t = p.totals;
   const status = doing(userId);
   const today = p.daily.at(-1)?.tokens ?? 0;
+  const reward = ITEMS.find((i) => i.level !== undefined && i.level > p.level);
   return (
     <Modal
       title={
@@ -84,9 +94,20 @@ export function PlayerCard({ userId }: { userId: number }) {
           </p>
           <XpBar level={p.level} tokens={p.lifetimeTokens} today={today} />
           <p className="muted small">
-            Next: Lv{p.level + 1} {levelTitle(p.level + 1)} in{" "}
-            {compact(levelAt(p.level + 1) - p.lifetimeTokens)} tokens
+            {p.level >= MAX_LEVEL ? (
+              "Max level"
+            ) : (
+              <>
+                Next: Lv{p.level + 1} {levelTitle(p.level + 1)} in{" "}
+                {compact(levelAt(p.level + 1) - p.lifetimeTokens)} tokens
+              </>
+            )}
           </p>
+          {reward && (
+            <p className="muted small">
+              Reward at Lv{reward.level}: {reward.name}
+            </p>
+          )}
           {p.badges.length > 0 && (
             <ul className="badges">
               {p.badges.map((b) => {
@@ -140,8 +161,9 @@ export function PlayerCard({ userId }: { userId: number }) {
   );
 }
 
-/** Progress through the current level: earlier tokens, then today's. */
+/** Progress through the current level: earlier tokens, then today's. Full at the top level. */
 function XpBar({ level, tokens, today }: { level: number; tokens: number; today: number }) {
+  const max = level >= MAX_LEVEL;
   const start = levelAt(level);
   const span = levelAt(level + 1) - start;
   // Today's tokens that count toward this level: all of the progress if today crossed into it.
@@ -149,8 +171,8 @@ function XpBar({ level, tokens, today }: { level: number; tokens: number; today:
   const gained = tokens - start - before;
   return (
     <div className="xp" aria-hidden="true">
-      <span className="xp-done" style={{ width: `${(before / span) * 100}%` }} />
-      <span className="xp-gain" style={{ width: `${(gained / span) * 100}%` }} />
+      <span className="xp-done" style={{ width: max ? "100%" : `${(before / span) * 100}%` }} />
+      <span className="xp-gain" style={{ width: max ? 0 : `${(gained / span) * 100}%` }} />
     </div>
   );
 }

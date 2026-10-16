@@ -68,11 +68,12 @@ export const OUTFITS: [string, string][] = [
   ["#3c4454", "#262c38"],
   ["#f28bb2", "#cf6690"],
   ["#f2f0ea", "#cfcac0"],
-  // From the shop: hacker hoodie, sharp suit, galaxy jacket, gold suit.
+  // From the shop: hacker hoodie, sharp suit, galaxy jacket, gold suit; then server-rack armour (level 20).
   ["#1f2a24", "#3ddc84"],
   ["#2c3142", "#1b1f2b"],
   ["#5b3fbf", "#e86bd8"],
   ["#e9b73d", "#b98a1f"],
+  ["#5d6470", "#3ddc84"],
 ];
 export const PANTS = [
   "#3d4a6b",
@@ -87,4 +88,5 @@ export const PANTS = [
   "#1b1f2b",
   "#2a2150",
   "#8f6a17",
+  "#3a3f4b",
 ];
