@@ -3,10 +3,8 @@ import { type DayFacts, EMPTY_DAY, QUESTS, questCoins } from "../src/quests.ts";
 
 /** Each quest's threshold, as the one fact it checks. */
 const AT: Record<string, [keyof DayFacts, number]> = {
-  tokens: ["tokens", 500e6],
   parallel: ["peakAgents", 5],
   hours: ["activeBuckets", 24],
-  prs: ["prs", 2],
 };
 
 test("each quest is done at its threshold, not one below", () => {
@@ -19,7 +17,7 @@ test("each quest is done at its threshold, not one below", () => {
   }
 });
 
-test("a full day pays 14, an empty one nothing", () => {
-  expect(questCoins({ tokens: 500e6, peakAgents: 5, activeBuckets: 24, prs: 2 })).toBe(14);
+test("a full day pays 7, an empty one nothing", () => {
+  expect(questCoins({ tokens: 500e6, peakAgents: 5, activeBuckets: 24 })).toBe(7);
   expect(questCoins(EMPTY_DAY)).toBe(0);
 });
