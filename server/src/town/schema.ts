@@ -44,15 +44,21 @@ export async function migrate(sql: Sql): Promise<void> {
   await sql.execute(`CREATE TABLE IF NOT EXISTS purchases (
     user_id INTEGER NOT NULL, item TEXT NOT NULL, price INTEGER NOT NULL, at INTEGER NOT NULL,
     PRIMARY KEY (user_id, item)) WITHOUT ROWID`);
-  // Coins that move between players: stakes and side bets held, then paid out or refunded.
-  // Negative amounts leave a wallet. Every `ref` sums to 0 or less, never more, except `admin`:
-  // coins an admin gave or took (kind `admin`).
+  // Coins that move between players: stakes and side bets held, then paid out or refunded, and
+  // trades (kind `trade`: an item that changed hands takes its price back from the giver, whose
+  // purchase row went). Negative amounts leave a wallet. Every `ref` sums to 0 or less, never more,
+  // except `admin`: coins an admin gave or took (kind `admin`).
   await sql.execute(`CREATE TABLE IF NOT EXISTS ledger (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL, amount INTEGER NOT NULL, kind TEXT NOT NULL, ref TEXT NOT NULL,
     at INTEGER NOT NULL)`);
   await sql.execute("CREATE INDEX IF NOT EXISTS ledger_user ON ledger (user_id)");
   await sql.execute("CREATE INDEX IF NOT EXISTS ledger_ref ON ledger (ref)");
+  // One open offer per sender: a new one replaces it. `give` and `want` are `Side` JSON.
+  await sql.execute(`CREATE TABLE IF NOT EXISTS trades (
+    from_id INTEGER PRIMARY KEY, to_id INTEGER NOT NULL,
+    give TEXT NOT NULL, want TEXT NOT NULL, at INTEGER NOT NULL)`);
+  await sql.execute("CREATE INDEX IF NOT EXISTS trades_to ON trades (to_id, at)");
   // One row per player per finished game (void games aren't recorded), for stats and the Games board.
   await sql.execute(`CREATE TABLE IF NOT EXISTS match_players (
     match_id INTEGER NOT NULL, user_id INTEGER NOT NULL, game TEXT NOT NULL, place INTEGER NOT NULL,

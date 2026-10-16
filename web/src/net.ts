@@ -5,6 +5,7 @@ import {
   type CompanyInfo,
   type Houses,
   type Moves,
+  type Notice,
   type PlayerInfo,
   type RoomId,
   type Snapshot,
@@ -112,8 +113,8 @@ export function connect(token: string): void {
   conn.on("chat", (line: ChatLine) => applyChat(line));
   conn.on("bubble", (e: { userId: number; text: string }) => applyBubble(e));
   conn.on("jump", (id: number) => applyJump(id));
-  conn.on("notice", (text: string) => {
-    hud.set({ notice: { text, at: Date.now() } });
+  conn.on("notice", (n: Notice) => {
+    hud.set({ notice: { ...n, at: Date.now() } });
     void refreshMe();
   });
   conn.on("mention", (line: ChatLine) => hud.set({ mention: { line, at: Date.now() } }));

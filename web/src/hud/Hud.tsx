@@ -17,6 +17,7 @@ import { MiniBoard } from "./MiniBoard.tsx";
 import { Minimap } from "./Minimap.tsx";
 import { BotCard, PlayerCard } from "./PlayerCard.tsx";
 import { Shop } from "./Shop.tsx";
+import { TradePanel, TradesPanel } from "./Trades.tsx";
 import { Modal } from "./ui.tsx";
 
 export function Hud() {
@@ -181,6 +182,10 @@ function Panel() {
       return <NewTable invite={panel.invite} />;
     case "match":
       return <MatchPanel id={panel.id} />;
+    case "trade":
+      return <TradePanel userId={panel.userId} />;
+    case "trades":
+      return <TradesPanel />;
     case "menu":
       return (
         <Modal title="Menu">
@@ -190,6 +195,9 @@ function Panel() {
             </button>
             <button type="button" onClick={() => hud.set({ panel: { kind: "shop" } })}>
               🪙 Shop
+            </button>
+            <button type="button" onClick={() => hud.set({ panel: { kind: "trades" } })}>
+              🔁 Trades
             </button>
             <button type="button" onClick={() => hud.set({ panel: { kind: "arcade" } })}>
               🎮 Arcade
@@ -239,17 +247,21 @@ function FirstVisit() {
   return null;
 }
 
-/** A line for me from the server (a company application, or the answer to mine). */
+const NOTICE_ICONS = { company: "🏢", trades: "🔁", shop: "🪙" } as const;
+
+/** A line for me from the server (a company application, a trade); a click opens what it's about. */
 function NoticeToast() {
   const notice = useHud((s) => s.notice);
   if (!useFresh(notice?.at, MENTION_MS) || !notice) return null;
+  const { open } = notice;
   return (
     <button
       type="button"
       className="toast mention-toast"
-      onClick={() => hud.set({ notice: null, panel: { kind: "company" } })}
+      onClick={() => hud.set({ notice: null, ...(open && { panel: { kind: open } }) })}
     >
-      🏢 {notice.text}
+      {open && `${NOTICE_ICONS[open]} `}
+      {notice.text}
     </button>
   );
 }

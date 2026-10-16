@@ -72,3 +72,30 @@ export const itemById = (id: unknown): Item | undefined => ITEMS.find((i) => i.i
 
 /** The shop items a look wears; everything else in it is free. */
 export const itemsIn = (look: Look): Item[] => ITEMS.filter((i) => look[i.slot] === i.index);
+
+// MARK: Trading
+
+/** Shop items that can change hands: the sold ones. Level rewards and furniture can't. */
+export const isTradeable = (id: unknown): boolean => (itemById(id)?.price ?? 0) > 0;
+
+/** One side of a trade: what someone gives. */
+export interface Side {
+  coins: number;
+  items: string[];
+}
+/** The stake cap: a fat finger can't empty a wallet. */
+export const TRADE_COINS_CAP = 500;
+export const TRADE_ITEMS_CAP = 4;
+
+/** Null unless coins is an integer in range and every item is a priced shop item, no repeats. */
+export function parseSide(raw: unknown): Side | null {
+  if (!raw || typeof raw !== "object") return null;
+  const { coins, items } = raw as Record<string, unknown>;
+  if (!Number.isInteger(coins) || (coins as number) < 0 || (coins as number) > TRADE_COINS_CAP) return null;
+  if (!Array.isArray(items) || items.length > TRADE_ITEMS_CAP || new Set(items).size < items.length)
+    return null;
+  if (!items.every(isTradeable)) return null;
+  return { coins: coins as number, items: items as string[] };
+}
+
+export const emptySide = (s: Side): boolean => s.coins === 0 && s.items.length === 0;
