@@ -105,6 +105,7 @@ describe("rest spots", () => {
     const taken = new Set(beds.map(([x, y]) => `${x},${y}`));
     const overflow = restSpot("hq:1", "away", taken);
     expect(MAPS.hq.at(overflow.x, overflow.y)).toBe("_");
+    expect(overflow.x % 2).toBe(1); // a tile between neighbours
   });
 
   test("working players get a desk chair, facing their screen", () => {

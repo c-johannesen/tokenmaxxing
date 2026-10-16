@@ -78,7 +78,9 @@ export function OfficePanel() {
         style={{ gridTemplateColumns: `repeat(${MAPS.office.width - 2}, 4.5em)`, gridAutoRows: "3em" }}
       >
         {MAPS.office.find("_").map(([x, y]) => {
-          const name = pieceOf(at(x, y)?.ch)?.name;
+          // A wide piece's name on its own tile only, so two side by side read as two.
+          const here = at(x, y);
+          const name = pieceOf(here?.ch)?.name;
           return (
             <button
               key={`${x},${y}`}
@@ -88,7 +90,7 @@ export function OfficePanel() {
               aria-label={name ?? "Empty floor"}
               onClick={() => click(x, y)}
             >
-              {name}
+              {here?.x === x ? name : name && "·"}
             </button>
           );
         })}
@@ -110,6 +112,7 @@ export function OfficePanel() {
         >
           Save
         </button>
+        {cost > wallet.balance && <span className="muted"> Not enough coins</span>}
       </p>
       {error && <p className="error">{error}</p>}
     </Modal>

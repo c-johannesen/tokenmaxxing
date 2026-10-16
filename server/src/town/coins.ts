@@ -16,7 +16,7 @@ import { levelOf, lookOf, TOKENS, userById } from "./users.ts";
 
 export interface Wallet {
   balance: number;
-  /** Coins from today's tokens so far. */
+  /** Coins from today so far: tokens and quests. */
   today: number;
   /** Days finished in the top 3, newest first (the last 30 days). */
   wins: { day: string; place: number; coins: number }[];
@@ -86,7 +86,7 @@ export async function wallet(sql: Sql, userId: number, now: number): Promise<Wal
   const todays = facts.get(today) ?? EMPTY_DAY;
   return {
     balance: earned - (spent ?? 0) + (await ledgerSum(sql, userId)),
-    today: coinsForTokens(days.find((d) => d.day === today)?.tokens ?? 0),
+    today: coinsForTokens(todays.tokens) + questCoins(todays),
     wins: wins.filter((w) => w.day >= since),
     owned: await ownedIds(sql, userId),
     quests: QUESTS.map(({ done, ...q }) => ({ ...q, done: done(todays) })),

@@ -191,6 +191,7 @@ describe("daily quests", () => {
     const w = await wallet(sql, 4, NOW);
     expect(w.quests.filter((q) => q.done).map((q) => q.id)).toEqual(["tokens"]);
     expect(w.balance).toBe(22 + 5); // √500, and no podium for a day that isn't over
+    expect(w.today).toBe(22 + 5);
   });
 });
 

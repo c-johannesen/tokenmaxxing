@@ -49,11 +49,13 @@ export function Hud() {
           Reconnecting…
         </div>
       )}
-      <MentionToast />
-      <NoticeToast />
-      <QuestToast />
-      <InviteToast />
-      <LevelToast />
+      <div className="toasts">
+        <MentionToast />
+        <NoticeToast />
+        <QuestToast />
+        <InviteToast />
+        <LevelToast />
+      </div>
       <FirstVisit />
     </>
   );
