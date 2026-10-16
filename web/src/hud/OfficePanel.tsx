@@ -1,7 +1,6 @@
 import { MAPS } from "@tokenmaxxing/core/maps.ts";
 import { FURNITURE, OFFICE_PIECES, type Placed, parseOffice, pieceOf } from "@tokenmaxxing/core/office.ts";
 import { useEffect, useState } from "react";
-import { world } from "../game/world.ts";
 import { town } from "../net.ts";
 import { Modal, Pills, useRun } from "./ui.tsx";
 
@@ -18,7 +17,7 @@ export function OfficePanel() {
   const [tool, setTool] = useState<string>(FURNITURE[0]!.ch);
   const { error, busy, run } = useRun();
   useEffect(() => {
-    void town.office(world.selfId).then((o) => {
+    void town.office().then((o) => {
       setSaved(o);
       setList(o.furniture);
     });

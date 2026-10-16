@@ -144,3 +144,5 @@ open the right panel (`web/src/hud/Hud.tsx:240` opens `company` on every click t
 - Arcade toasts carry no `open`.
 - Both panels live in `web/src/hud/Trades.tsx`.
 - The trade panel lists their items from `town.tradeables(userId)`; `Profile` has no `owned`.
+- Superseded by `specs/inventory.md`: trades move `items` rows, not `purchases`, and an item adds no ledger
+  row; only coins go through the ledger.

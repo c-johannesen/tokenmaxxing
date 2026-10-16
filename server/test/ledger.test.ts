@@ -191,6 +191,8 @@ describe("the bag", () => {
   });
 
   test("the backfill turns purchases and office pieces into rows, once", async () => {
+    // A database from before `items`.
+    await sql.execute("DROP TABLE items");
     await sql.execute("INSERT INTO purchases VALUES (2, 'hat.1', 100, 5), (3, 'glasses.1', 0, 6)");
     await sql.execute(
       "INSERT INTO offices (user_id, furniture, updated_at) VALUES (2, ?, 7)",
@@ -206,6 +208,11 @@ describe("the bag", () => {
     ]);
     expect(await bag(sql, 3)).toEqual([{ item: "glasses.1", count: 1, placed: 0 }]);
     expect(await balance(2)).toBe(75 - 100);
+    // Every item gone (traded to someone deleted, say): the next start doesn't hand them out again.
+    await sql.execute("DELETE FROM items");
+    await migrate(sql);
+    expect(await bag(sql, 2)).toEqual([]);
+    expect(await bag(sql, 3)).toEqual([]);
   });
 });
 

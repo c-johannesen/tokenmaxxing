@@ -174,6 +174,11 @@ const BRANDINGS_PER_HOUR = 5;
 const APPLICATIONS_PER_HOUR = 10;
 /** Each one pings the other person. */
 const TRADES_PER_HOUR = 10;
+/** Each one sends a room (an office, a building, the town) to everyone in it again. */
+const ROOM_CHANGES_PER_MIN = 30;
+/** A new name is a new door sign: the building is rebuilt. */
+const RENAMES_PER_HOUR = 10;
+const MIN = 60_000;
 const HOUR = 3_600_000;
 /** Offers older than this are gone. */
 const TRADE_TTL = 7 * 24 * HOUR;
@@ -213,6 +218,9 @@ export const town = actor({
     brandings: new RateLimiter(BRANDINGS_PER_HOUR, HOUR),
     applications: new RateLimiter(APPLICATIONS_PER_HOUR, HOUR),
     trades: new RateLimiter(TRADES_PER_HOUR, HOUR),
+    offices: new RateLimiter(ROOM_CHANGES_PER_MIN, MIN),
+    drops: new RateLimiter(ROOM_CHANGES_PER_MIN, MIN),
+    renames: new RateLimiter(RENAMES_PER_HOUR, HOUR),
     /** Verified tokens, so a burst of calls doesn't ask `player` every time. */
     tokens: new Map() as TokenCache,
   }),
@@ -285,6 +293,8 @@ export const town = actor({
 
     rename: async (c, rawName: unknown): Promise<void> => {
       const userId = requireUser(c.conn.state);
+      if (!c.vars.renames.take(String(userId), Date.now()))
+        throw new UserError("That's a lot of new names. Try again in an hour.", { code: "rate_limited" });
       await renameUser(c.db, c.vars.serial, c.client<typeof registry>(), userId, rawName);
     },
 
@@ -294,7 +304,7 @@ export const town = actor({
       if (!look) throw new UserError("Unknown look.", { code: "invalid_look" });
       const owned = new Set(await ownedItems(c.db, userId));
       if (itemsIn(look).some((i) => !owned.has(i.id)))
-        throw new UserError("Buy it in the shop first.", { code: "not_owned" });
+        throw new UserError("You don't have one in your bag.", { code: "not_owned" });
       await c.db.execute("UPDATE users SET look = ? WHERE id = ?", JSON.stringify(look), userId);
       await pushPlayers(c.db, c.client<typeof registry>(), [userId]);
     },
@@ -454,17 +464,22 @@ export const town = actor({
      */
     drop: async (c, itemId: unknown): Promise<{ notice: string; drop?: Drop }> => {
       const userId = requireUser(c.conn.state);
+      if (!c.vars.drops.take(String(userId), Date.now()))
+        throw new UserError("That's a lot of drops. Try again in a minute.", { code: "rate_limited" });
       const client = c.client<typeof registry>();
+      const id = await c.vars.serial(() => takeOut(c.db, userId, itemId, Date.now()));
+      // Not under `serial` while `world` places it, so a slow world holds up nobody else. The row is on
+      // the floor meanwhile, with a fresh `dropped_at`: the sweeper leaves it, and if it landed and
+      // someone took it already, `giveBack` finds nothing to give.
+      // ponytail: one that landed but timed out stays on the floor with its row back here: taking it
+      // gets nothing (`pickUp` is false). `removeDrops` it here if that ever shows up.
+      const put = await main(client)
+        .world.placeDrop({ id, item: itemId as string, by: userId })
+        .catch((err) => {
+          console.warn(`[drop] ${id}: ${String(err)}`);
+          return { notice: "That didn't work. Try again." };
+        });
       const out = await c.vars.serial(async () => {
-        const id = await takeOut(c.db, userId, itemId, Date.now());
-        // ponytail: one that landed but timed out stays on the floor with its row back here: taking it
-        // gets nothing (`pickUp` is false). `removeDrops` it here if that ever shows up.
-        const put = await main(client)
-          .world.placeDrop({ id, item: itemId as string, by: userId })
-          .catch((err) => {
-            console.warn(`[drop] ${id}: ${String(err)}`);
-            return { notice: "That didn't work. Try again." };
-          });
         if ("notice" in put) {
           await giveBack(c.db, [id]);
           return put;
@@ -503,6 +518,10 @@ export const town = actor({
       if (toId === userId) throw new UserError("Trade with someone else.", { code: "invalid_trade" });
       const me = await userById(c.db, userId);
       const them = await userById(c.db, toId);
+      // `parseSide` refuses a reward too; this says why.
+      const asked = [rawGive, rawWant].flatMap((s) => (s as { items?: unknown } | null)?.items ?? []);
+      if (asked.some((i) => itemById(i)?.tradeable === false))
+        throw new UserError("Level rewards stay with you.", { code: "invalid_trade" });
       const give = parseSide(rawGive);
       const want = parseSide(rawWant);
       if (give && want && emptySide(give) && emptySide(want))
@@ -578,17 +597,14 @@ export const town = actor({
       return { name: u.name, owned: (await ownedItems(c.db, u.id)).filter(isTradeable) };
     },
 
-    /** Someone's office: what's in it, whether it's open, and what having one takes (level, company). */
-    office: async (c, targetId: unknown): Promise<Office & { level: number; companyId: number | null }> => {
-      requireUser(c.conn.state);
-      if (typeof targetId !== "number") throw new UserError("Unknown player.", { code: "not_found" });
-      const u = await userById(c.db, targetId);
-      return { ...(await officeOf(c.db, u.id)), level: await levelOf(c.db, u.id), companyId: u.companyId };
-    },
+    /** My office: what's in it, and whether it's open. */
+    office: (c): Promise<Office> => officeOf(c.db, requireUser(c.conn.state)),
 
     /** Saves my office's furniture, from my bag. */
     setOffice: async (c, raw: unknown): Promise<void> => {
       const userId = requireUser(c.conn.state);
+      if (!c.vars.offices.take(String(userId), Date.now()))
+        throw new UserError("That's a lot of changes. Try again in a minute.", { code: "rate_limited" });
       if ((await levelOf(c.db, userId)) < OFFICE_LEVEL)
         throw new UserError(`Your own office opens at level ${OFFICE_LEVEL}.`, { code: "too_low" });
       if ((await userById(c.db, userId)).companyId === null)
@@ -604,6 +620,8 @@ export const town = actor({
     /** Open: anyone can visit from my player card. Closed: only I get in, through the door. */
     setOfficeOpen: async (c, open: unknown): Promise<void> => {
       const userId = requireUser(c.conn.state);
+      if (!c.vars.offices.take(String(userId), Date.now()))
+        throw new UserError("That's a lot of changes. Try again in a minute.", { code: "rate_limited" });
       if (typeof open !== "boolean") throw new UserError("Open or closed?", { code: "invalid_office" });
       await starterOffice(c.db, userId, Date.now());
       await c.db.execute("UPDATE offices SET open = ? WHERE user_id = ?", open ? 1 : 0, userId);

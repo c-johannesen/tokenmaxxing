@@ -89,6 +89,9 @@ describe("portals", () => {
     ]);
     const bo = doors[1]!;
     expect(portal("hq:3", { ch: "R", x: bo.x, y: bo.y }, 3, plots, doors)).toEqual(roomEntry("office:9"));
+    expect(portal("hq:5", { ch: "R", x: bo.x, y: bo.y }, 3, plots, [])).toEqual({
+      notice: "That door isn't yours to open.",
+    });
     expect(portal("office:9", exit, 3, plots, doors)).toEqual({
       room: "hq:3",
       x: bo.x,

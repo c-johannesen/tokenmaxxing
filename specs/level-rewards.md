@@ -147,4 +147,4 @@ Every caller of `levelFor` (`boards.ts`, `users.ts`, `companies.ts`, `admin.ts`)
 
 - The toast's office line is gated on having a company; without one it says
   `· Join a company for your own office`.
-- `setLook` checks `ownedIds` (purchases and level items, two queries), not the whole `wallet`.
+- `setLook` checks `ownedItems` (the `items` table, one query), not the whole `wallet`.

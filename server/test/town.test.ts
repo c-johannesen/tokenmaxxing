@@ -253,7 +253,7 @@ describe("coins and the shop", () => {
   test("buy, then wear; not before, not when short; a second one is another in the bag", async () => {
     const a = await signUp("shop");
     await expect(a.town.buy("glasses.1")).rejects.toThrow("coins");
-    await expect(a.town.setLook({ ...(await a.town.me()).look, glasses: 1 })).rejects.toThrow("shop");
+    await expect(a.town.setLook({ ...(await a.town.me()).look, glasses: 1 })).rejects.toThrow("bag");
     await admin().adminSetCoins(a.userId, 130);
     const after = await a.town.buy("glasses.1");
     expect(after.balance).toBe(70);
@@ -332,7 +332,7 @@ describe("trades", () => {
     // A level reward never changes hands.
     await expect(
       ada.town.offerTrade(bo.userId, { coins: 0, items: ["hat.4"] }, coins(0)),
-    ).rejects.toMatchObject({ code: "invalid_trade" });
+    ).rejects.toMatchObject({ code: "invalid_trade", message: "Level rewards stay with you." });
     const { conn, got } = await notices(bo.token);
     await ada.town.offerTrade(bo.userId, coins(10), coins(0));
     await eventually(() =>
@@ -421,8 +421,14 @@ describe("offices", () => {
     await a.town.setOffice([...STARTER_OFFICE, sofa]);
     expect((await a.town.wallet()).balance).toBe(50);
     expect(await a.town.bag()).toContainEqual({ item: "furn.s", count: 1, placed: 1 });
-    expect(await a.town.office(a.userId)).toMatchObject({ furniture: [...STARTER_OFFICE, sofa], open: true });
+    expect(await a.town.office()).toMatchObject({ furniture: [...STARTER_OFFICE, sofa], open: true });
     // Bought, not held like a stake: the account can still be deleted.
     await admin().adminDeleteUser(a.userId);
+  });
+
+  test("thirty changes a minute: each one sends the office and its building to everyone in them", async () => {
+    const a = await signUp("office");
+    for (let i = 0; i < 30; i++) await a.town.setOfficeOpen(i % 2 === 0);
+    await expect(a.town.setOfficeOpen(true)).rejects.toMatchObject({ code: "rate_limited" });
   });
 });

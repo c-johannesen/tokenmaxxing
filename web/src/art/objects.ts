@@ -322,8 +322,12 @@ function placeObject(map: GameMap, x: number, y: number): Placed | null {
       return at(chair());
     case "s":
       return at(sofa(map.at(x - 1, y) !== "s", map.at(x + 1, y) !== "s"));
-    case "t":
-      return map.at(x - 1, y) !== "t" ? at(tv()) : null;
+    case "t": {
+      // Two tiles each: in a run of them (TVs side by side), every other tile starts one.
+      let n = 0;
+      while (map.at(x - n - 1, y) === "t") n++;
+      return n % 2 === 0 ? at(tv()) : null;
+    }
     case "k":
       return at(shelf());
     case "p":

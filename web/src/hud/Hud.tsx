@@ -317,7 +317,7 @@ function LevelToast() {
       className="toast mention-toast"
       onClick={() => {
         setUp(null);
-        hud.set({ panel: { kind: "shop" } });
+        hud.set({ panel: { kind: "bag" } });
       }}
     >
       ⬆️ Level {up.to} · {levelTitle(up.to)}

@@ -1,6 +1,6 @@
 # Daily quests
 
-Four small goals, the same four every day, paid in coins. They turn "burn tokens" into "do this today",
+Two small goals, the same two every day, paid in coins. They turn "burn tokens" into "do this today",
 and they use nothing but the rollups the town already keeps.
 
 Netstationen tied rewards to quests; here the quests say what a good day looks like.
@@ -13,7 +13,7 @@ Netstationen tied rewards to quests; here the quests say what a good day looks l
   that day, the way coins are worked out from usage (`server/src/town/coins.ts:31`). Only days from the
   day you signed up count, same rule as coins; a late sync still pays.
 - A quest completes when its check passes. No claiming. The toast is the client noticing.
-- At most 14 coins a day on top of the usual pay: a side dish, not the meal.
+- At most 7 coins a day on top of the usual pay: a side dish, not the meal.
 
 | Id | Text | Coins | Check on the day's facts |
 |---|---|---|---|
@@ -24,10 +24,10 @@ Netstationen tied rewards to quests; here the quests say what a good day looks l
 
 ```ts
 // core/src/quests.ts
-export interface DayFacts { tokens: number; peakAgents: number; activeBuckets: number; prs: number }
+export interface DayFacts { tokens: number; peakAgents: number; activeBuckets: number }
 export interface Quest { id: string; text: string; coins: number; done: (f: DayFacts) => boolean }
 export const QUESTS: readonly Quest[];
-export const EMPTY_DAY: DayFacts = { tokens: 0, peakAgents: 0, activeBuckets: 0, prs: 0 };
+export const EMPTY_DAY: DayFacts = { tokens: 0, peakAgents: 0, activeBuckets: 0 };
 /** Coins a day paid: the sum over the quests that `done`. */
 export const questCoins = (f: DayFacts): number;
 ```
@@ -39,7 +39,7 @@ export const questCoins = (f: DayFacts): number;
 `server/src/town/coins.ts`:
 
 - `wallet()` already reads tokens per day (`days`). Add one query for activity per day:
-  `SELECT day, peak_agents AS peakAgents, active_buckets AS activeBuckets, prs FROM activity_daily WHERE user_id = ? AND day >= ?`
+  `SELECT day, peak_agents AS peakAgents, active_buckets AS activeBuckets FROM activity_daily WHERE user_id = ? AND day >= ?`
   (`activity_daily` has one row per user and day, `schema.ts:34`). Merge the two by day into `DayFacts`.
 - `earned += Σ questCoins(facts)` over those days; `quests` is `QUESTS` mapped with
   `done(facts.get(today) ?? EMPTY_DAY)`.
@@ -50,21 +50,21 @@ the moment it lands.
 
 ## Client
 
-- `web/src/hud/Shop.tsx`, under the wallet line: `📜 Today's quests`, four rows with ✓ or ○, text and
+- `web/src/hud/Shop.tsx`, under the wallet line: `📜 Today's quests`, two rows with ✓ or ○, text and
   `🪙 n`. The wallet is already fetched there.
 - Toast: `QuestToast` in `Hud.tsx` keeps the set of done quest ids from the last `wallet`
   (`hud.wallet`, refreshed after every sync and every 30 s, `web/src/net.ts:157`). A new id shows
   `✓ Run 5 agents at once · 🪙 5`; click opens the shop. The first wallet after load sets the baseline.
-- Optional: `2/4 📜` in the HUD corner next to today's coins, opening the shop.
+- Optional: `1/2 📜` in the HUD corner next to today's coins, opening the shop.
 
 ## Tests
 
 - `core/test/quests.test.ts`: every quest is false on `EMPTY_DAY`; each is true at its threshold and false
-  one below; `questCoins` of a full day is 14.
+  one below; `questCoins` of a full day is 7.
 - `server/test/ledger.test.ts`: insert an `activity_daily` row with `peak_agents = 5` on a day after
   sign-up, and `wallet().balance` rises by 5; the same row on a day before sign-up pays nothing;
-  `wallet().quests` for today has `done: false` ×4 for a fresh user and `done: true` for `tokens` after a
-  500M day.
+  `wallet().quests` for today has `done: false` ×2 for a fresh user and `done: true` for `parallel` after a
+  day with 5 agents at once.
 
 ## Deliberate limits
 

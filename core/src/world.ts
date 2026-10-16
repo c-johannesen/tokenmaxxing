@@ -106,8 +106,7 @@ export const pieceOfDrop = (d: Pick<Drop, "item">): Piece | undefined =>
   d.item.startsWith("furn.") ? pieceOf(d.item.slice(5)) : undefined;
 
 /** What it is: "Sofa", "Duck". */
-export const dropName = (d: Pick<Drop, "item">): string =>
-  pieceOfDrop(d)?.name ?? itemById(d.item)?.name ?? "Something";
+export const dropName = (d: Pick<Drop, "item">): string => itemById(d.item)?.name ?? "Something";
 
 /** Whether a drop lies on (x, y): a TV is two tiles. */
 export const dropCovers = (d: Drop, x: number, y: number): boolean =>
@@ -419,7 +418,11 @@ export function portal(
   plots: ReadonlyMap<number, { id: number; name: string }>,
   doors: readonly Door[] = [],
 ): Place | { notice: string } {
-  if (door.ch === "R") return roomEntry(`office:${doorAt(doors, door.x, door.y)!.userId}`);
+  if (door.ch === "R") {
+    // `doors` are your own building's: in anyone else's, none of them is here.
+    const d = doorAt(doors, door.x, door.y);
+    return d ? roomEntry(`office:${d.userId}`) : { notice: "That door isn't yours to open." };
+  }
   const owner = ownerOfOffice(room);
   if (owner !== null) {
     if (companyId === null) return roomEntry("inn");

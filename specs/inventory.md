@@ -248,8 +248,8 @@ The world and client half of drops.
   to `mapOf`. `mapOf` keeps each room's overlay until `setDrops` runs or the room's own map changes
   (`setTown`, `setHq`, `setOffice` make a new one), so those don't need to call `setDrops`. The overlay
   reuses `officeMap`, which now takes the map to write over.
-- A furniture drop's kind is `furn.<ch>` read through `FURNITURE`, so it works before PR 1 adds those ids
-  to `ITEMS`.
+- A furniture drop's kind is `furn.<ch>`: `dropName` reads its name from `ITEMS` like any item's, and
+  `pieceOfDrop` its piece (`ch`, `w`) through `FURNITURE`.
 - `placeDrop` returns the `Drop`, or `{ notice: "There's no room on the floor here." }` past 30 in the
   room (or with no free tile), for the town to hand the row back and show the notice. It finds the tile
   with `findSpot` (the game tables' finder), which also keeps drops off and around game tables in town.
