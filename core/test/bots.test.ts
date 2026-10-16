@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { BOTS, type BotDef, chase, lineFor, toCoffee, wander } from "../src/bots.ts";
+import { MAX_LEVEL } from "../src/format.ts";
 import { MAPS, plotId, townMap } from "../src/maps.ts";
 import { worldClock } from "../src/range.ts";
 import { CHAT_MAX_LENGTH, DIRS, parseLook } from "../src/world.ts";
@@ -9,6 +10,7 @@ describe("bots", () => {
     expect(new Set(BOTS.map((b) => b.id)).size).toBe(BOTS.length);
     for (const b of BOTS) {
       expect(b.id).toBeLessThan(0);
+      expect(b.level).toBeLessThanOrEqual(MAX_LEVEL);
       expect(parseLook(b.look)).toEqual(b.look);
       expect(b.lines.length).toBeGreaterThan(0);
       for (const line of b.lines) expect(line.length).toBeLessThanOrEqual(CHAT_MAX_LENGTH);

@@ -63,7 +63,7 @@ export function Computers() {
               <span>
                 {d.kind === "app" ? "💻" : "🖥"} {d.name}{" "}
                 <small className="muted">
-                  {d.kind === "app" ? "the app" : (PLATFORMS[d.platform] ?? d.platform)}
+                  {d.kind === "app" ? "this Mac" : (PLATFORMS[d.platform] ?? d.platform)}
                   {d.kind === "linked" && ` · synced ${ago(d.lastSeenAt, now)}`}
                 </small>
               </span>

@@ -431,11 +431,12 @@ export const town = actor({
       const them = await userById(c.db, toId);
       const give = parseSide(rawGive);
       const want = parseSide(rawWant);
-      if (!give || !want || (emptySide(give) && emptySide(want)))
-        throw new UserError(
-          `Up to 🪙 ${TRADE_COINS_CAP} and ${TRADE_ITEMS_CAP} shop items a side, and something at all.`,
-          { code: "invalid_trade" },
-        );
+      if (give && want && emptySide(give) && emptySide(want))
+        throw new UserError("Offer something, or ask for something.", { code: "invalid_trade" });
+      if (!give || !want)
+        throw new UserError(`Up to 🪙 ${TRADE_COINS_CAP} and ${TRADE_ITEMS_CAP} shop items a side.`, {
+          code: "invalid_trade",
+        });
       const now = Date.now();
       const trade = { fromId: userId, from: me.name, toId, to: them.name, give, want, at: now };
       // Their coins are theirs to know: accepting checks them.

@@ -46,7 +46,11 @@ export function TradePanel({ userId }: { userId: number }) {
           />
           <SideFields legend="You get" side={want} items={them.owned} onChange={setWant} />
         </div>
-        <button type="submit" className="primary" disabled={busy}>
+        <button
+          type="submit"
+          className="primary"
+          disabled={busy || give.coins > TRADE_COINS_CAP || want.coins > TRADE_COINS_CAP}
+        >
           Offer
         </button>
       </form>
@@ -87,11 +91,12 @@ function SideFields({
           onChange={(e) =>
             onChange({
               ...side,
-              coins: Math.max(0, Math.min(TRADE_COINS_CAP, Math.floor(Number(e.target.value)) || 0)),
+              coins: Math.max(0, Math.floor(Number(e.target.value)) || 0),
             })
           }
         />
       </label>
+      {side.coins > TRADE_COINS_CAP && <small className="error">Up to 🪙 {TRADE_COINS_CAP}</small>}
       {items.length > 0 ? (
         <div className="pills">
           {items.map((id) => (
@@ -113,6 +118,9 @@ export function TradesPanel() {
   const { error, run: call } = useRun();
   useEffect(() => {
     void town.trades().then(setList, () => setList({ incoming: [], outgoing: null }));
+    // ponytail: a poll, not an event; an offer withdrawn under you is rare.
+    const id = setInterval(() => void town.trades().then(setList, () => {}), 10_000);
+    return () => clearInterval(id);
   }, []);
   // Whatever happened, show what's open now.
   const run = (fn: () => Promise<unknown>) =>

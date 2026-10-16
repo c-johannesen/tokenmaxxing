@@ -379,11 +379,17 @@ export function homeRoom(companyId: number | null): RoomId {
 
 /**
  * The first free bed (`away`) or desk chair (`working`) in `room`, then the
- * first free floor tile. `taken` holds `"x,y"` of spots already in use.
+ * first free floor tile: every other one first, so neighbours' name labels don't
+ * overlap, then the rest. `taken` holds `"x,y"` of spots already in use.
  */
 export function restSpot(room: RoomId, state: "away" | "working", taken: ReadonlySet<string>): Place {
   const map = mapOf(room);
-  const spots = [...map.find(state === "away" ? "b" : "c"), ...map.find("_").filter(([, y]) => y >= 3)];
+  const floor = map.find("_").filter(([, y]) => y >= 3);
+  const spots = [
+    ...map.find(state === "away" ? "b" : "c"),
+    ...floor.filter(([x]) => x % 2 === 1),
+    ...floor.filter(([x]) => x % 2 === 0),
+  ];
   const free = spots.find(([x, y]) => !taken.has(`${x},${y}`)) ?? spots[0]!;
   return { room, x: free[0], y: free[1], facing: state === "working" ? "up" : "down" };
 }
