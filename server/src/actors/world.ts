@@ -124,7 +124,7 @@ const BOT_STEP_EVERY = 3;
 const BOT_PAUSE_MS: [number, number] = [2_000, 12_000];
 const BOT_TALK_PAUSE_MS = 4_000;
 /** The chance a bot done with a walk tags along after someone online in town instead (by default), and for how long. */
-const BOT_FOLLOW_CHANCE = 0.3;
+const BOT_FOLLOW_CHANCE = 0.08;
 const BOT_FOLLOW_MS: [number, number] = [20_000, 60_000];
 /** How soon a bot that starts following someone says something to them. */
 const BOT_GREET_MS: [number, number] = [3_000, 10_000];
@@ -850,8 +850,10 @@ function walkBots(s: WorldState, v: Vars & { bots: Map<number, BotRun> }, now: n
       }
       const roll = Math.random();
       const follow = b.followChance ?? BOT_FOLLOW_CHANCE;
-      if (inTown.length > 0 && roll < follow) {
-        run.following = pick(inTown);
+      // Nobody gets two bots at once.
+      const free = inTown.filter((id) => ![...v.bots.values()].some((r) => r.following === id));
+      if (free.length > 0 && roll < follow) {
+        run.following = pick(free);
         run.followUntil = now + between(BOT_FOLLOW_MS);
         run.sayAt = Math.min(run.sayAt, now + between(BOT_GREET_MS));
       } else if (roll < follow + BOT_COFFEE_CHANCE) {
