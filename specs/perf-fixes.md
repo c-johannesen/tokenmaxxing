@@ -32,7 +32,7 @@ starvation, a paused container, a deploy.
 
 Fixes, all small, in this PR **and** as a hotfix against upstream `main`:
 
-- **a. The crash:** `sendSnapshot(c, p).catch((err) => console.warn(\`[world] snapshot for ${id}: ${String(err)}\`))` in
+- **a. The crash:** ``sendSnapshot(c, p).catch((err) => console.warn(`[world] snapshot for ${id}: ${String(err)}`))`` in
   `flush`. Verified on `main`: six more freeze cycles logged the error four times and the server stayed up; town,
   arcade and world answered normally within a minute.
 - **b. The same kind, by reading:** `void conn.disconnect("deleted")` in `removePlayer` (branch `world.ts:601`, main
@@ -47,7 +47,7 @@ Fixes, all small, in this PR **and** as a hotfix against upstream `main`:
 - **e. The arcade's cleanup loop can stop for good:** in `sweep` (`server/src/actors/arcade.ts:593`) an uncaught
   `closeTable` failure (one failed `town.refund`) throws out of the `run` loop (`:123`), which RivetKit doesn't
   restart while anyone is connected; expired tables and stuck matches are then never cleaned up. Wrap it:
-  `await c.keepAwake(run(...)).catch((err) => console.warn(\`[arcade] sweep: ${String(err)}\`))`, or catch per table.
+  ``await c.keepAwake(run(...)).catch((err) => console.warn(`[arcade] sweep: ${String(err)}`))``, or catch per table.
 - **f. Match chat makes the tick expensive** (`server/src/actors/match.ts:184-186`): each `say` rebuilds the chat
   array through a fresh state proxy, so old lines gain one proxy layer per later line; with 50 lines one
   `plain(c.state)` takes ~14 ms and Hype Cycle calls it at least twice every 50 ms, more than half of the only JS
