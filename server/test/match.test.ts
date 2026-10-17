@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createRequire } from "node:module";
 import { type TokenmaxxingState, tokenmaxxing } from "@tokenmaxxing/core/games/tokenmaxxing.ts";
-import type { Frame } from "@tokenmaxxing/core/games/wire.ts";
+import type { Frame, MatchChatLine } from "@tokenmaxxing/core/games/wire.ts";
 import { match } from "../src/actors/match.ts";
 
 // Use the same proxy version as RivetKit without making it a runtime dependency of our server.
@@ -43,6 +43,7 @@ function battle() {
       bets: {},
       forfeited: [] as number[],
       reported: false,
+      chat: [] as MatchChatLine[],
     },
     () => writes++,
   );
@@ -135,4 +136,17 @@ test("a usage query finishing after a forfeit does not restore that player's sco
   expect(await usage).toMatchObject({ tokens: 0, place: null });
   expect(b.state.state.forfeited).toContain(1);
   expect(b.state.state.tokens[1]).toBe(0);
+});
+
+test("the match's chat stays plain however long it gets", async () => {
+  const b = battle();
+  const user = {
+    ...b.ctx,
+    conn: { state: { kind: "user", userId: 1 } },
+    vars: { chat: { take: () => true } },
+  } as unknown as Parameters<typeof actions.say>[0];
+  for (let i = 1; i <= 50; i++) await actions.say(user, `line ${i}`);
+  // Stored lines that were proxies gained a layer with every later line, and cloning them throws.
+  const chat = structuredClone(onChange.target(b.state).chat);
+  expect(chat.map((l) => l.text)).toEqual(Array.from({ length: 50 }, (_, i) => `line ${i + 1}`));
 });

@@ -51,21 +51,24 @@ export function baseMap(room: RoomId): GameMap {
 
 /**
  * A room's map, with the furniture dropped in it written over the floor (other drops aren't in it). Kept
- * until its drops or its own map change. ponytail: a dropped hat or pet rebuilds it too (and the client
- * bakes the ground again); leave those out of the key if they ever churn.
+ * until its furniture or its own map change, so a dropped hat or pet leaves it as it is.
  */
 export function mapOf(room: RoomId): GameMap {
   const base = baseMap(room);
   const hit = dropped.get(room);
   if (hit?.base === base) return hit.map;
-  const pieces = (DROPS.get(room) ?? []).flatMap((d) => {
+  const pieces = piecesIn(DROPS.get(room) ?? []);
+  const map = pieces.length ? withPieces(pieces, base) : base;
+  dropped.set(room, { base, map, key: JSON.stringify(pieces) });
+  return map;
+}
+
+/** The furniture among `drops`, as pieces of a map. */
+const piecesIn = (drops: readonly Drop[]) =>
+  drops.flatMap((d) => {
     const piece = pieceOfDrop(d);
     return piece ? [{ ch: piece.ch, x: d.x, y: d.y }] : [];
   });
-  const map = pieces.length ? withPieces(pieces, base) : base;
-  dropped.set(room, { base, map });
-  return map;
-}
 
 // MARK: Drops
 
@@ -82,11 +85,11 @@ export interface Drop {
 
 /** What's on each room's floor. ponytail: one process holds every room's, like the town. */
 export const DROPS = new Map<RoomId, readonly Drop[]>();
-const dropped = new Map<RoomId, { base: GameMap; map: GameMap }>();
+const dropped = new Map<RoomId, { base: GameMap; map: GameMap; key: string }>();
 
 export function setDrops(room: RoomId, drops: readonly Drop[]): void {
   DROPS.set(room, drops);
-  dropped.delete(room);
+  if (dropped.get(room)?.key !== JSON.stringify(piecesIn(drops))) dropped.delete(room);
 }
 
 /** A dropped piece of furniture (`furn.<ch>`); wearables and pets lie on the floor as themselves. */

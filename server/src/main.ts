@@ -105,3 +105,21 @@ const server = Bun.serve({
 console.log(
   `[tokenmaxxing] v${config.version} listening on ${server.url} (data: ${storage ?? "~/.rivetkit"})`,
 );
+
+// Past the top-level awaits, Bun exits on an unhandled rejection: one stray promise isn't worth the
+// whole server. A thrown exception may have left something halfway, so that one still exits.
+process.on("unhandledRejection", (err) => console.error("[unhandledRejection]", err));
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err);
+  process.exit(1);
+});
+
+// A dead engine never comes back while this process lives: exit after two minutes unhealthy, and
+// Railway (ON_FAILURE) starts both again.
+let unhealthy = 0;
+setInterval(async () => {
+  unhealthy = (await health()).ok ? 0 : unhealthy + 1;
+  if (unhealthy < 4) return;
+  console.error("[tokenmaxxing] unhealthy for 2 minutes, exiting");
+  process.exit(1);
+}, 30_000);

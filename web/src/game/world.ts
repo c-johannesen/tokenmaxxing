@@ -16,6 +16,7 @@ import {
   type PlayerPos,
   type PlayerState,
   type PlayerView,
+  pieceOfDrop,
   type RoomId,
   RUN_STEP_MS,
   type Snapshot,
@@ -23,7 +24,7 @@ import {
   WALK_STEP_MS,
   type WorldGame,
 } from "@tokenmaxxing/core/world.ts";
-import { bakeGround } from "../art/tiles.ts";
+import { bakeGround, repaintGround } from "../art/tiles.ts";
 import { hud } from "../store.ts";
 import { emojiOnly } from "./emoji.ts";
 
@@ -278,9 +279,28 @@ export function applyPickup(id: number): void {
 }
 
 function showDrops(drops: Drop[]): void {
+  const was = { drops: world.drops, map: world.map, ground: world.ground };
   world.drops = drops;
   setDrops(world.room, drops);
-  showMap(world.room);
+  if (!was.ground) {
+    showMap(world.room);
+    return;
+  }
+  // A parcel changes no ground, and the map stays the same (`mapOf`).
+  world.map = mapOf(world.room);
+  if (world.map === was.map) return;
+  // Furniture: only the tiles around each piece that came or went, as the ground looks at neighbours.
+  const tiles: [number, number][] = [];
+  for (const d of [...was.drops, ...drops]) {
+    const piece = pieceOfDrop(d);
+    if (!piece || (was.drops.includes(d) && drops.includes(d))) continue;
+    for (let y = d.y - 1; y <= d.y + 1; y++)
+      for (let x = d.x - 1; x <= d.x + (piece.w ?? 1); x++) tiles.push([x, y]);
+  }
+  repaintGround(was.ground, world.map, tiles);
+  // Patched in place: the old map's ground is gone (an empty office's map is every empty office's).
+  grounds.delete(was.map);
+  grounds.set(world.map, was.ground);
 }
 
 // MARK: Games

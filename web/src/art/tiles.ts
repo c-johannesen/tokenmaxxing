@@ -1,7 +1,7 @@
 import type { GameMap } from "@tokenmaxxing/core/maps.ts";
 import { TILE } from "@tokenmaxxing/core/world.ts";
 import { C } from "./palette.ts";
-import { bake, hash, type Pen } from "./pixels.ts";
+import { bake, hash, Pen } from "./pixels.ts";
 
 /** What a tile's ground is made of. Objects stand on whatever their neighbours are. */
 type Ground = "grass" | "path" | "plaza" | "flowers" | "water" | "floor" | "rug" | "wall" | "exit";
@@ -158,44 +158,57 @@ function exit(p: Pen, ox: number, oy: number, x: number, y: number): void {
   p.rect(ox + 4, oy + 5, TILE - 8, 6, C.rug);
 }
 
+/** One tile's ground, in its place on a canvas of the whole map. */
+function paintTile(p: Pen, map: GameMap, x: number, y: number): void {
+  const ox = (x - map.x0) * TILE;
+  const oy = (y - map.y0) * TILE;
+  switch (groundAt(map, x, y)) {
+    case "grass":
+      grass(p, ox, oy, x, y);
+      break;
+    case "flowers":
+      flowers(p, ox, oy, x, y);
+      break;
+    case "path":
+      speckle(p, ox, oy, x, y, C.path, C.pathDark, C.pathLight);
+      break;
+    case "plaza":
+      plaza(p, ox, oy, x, y);
+      break;
+    case "water":
+      water(p, map, ox, oy, x, y);
+      break;
+    case "floor":
+      floor(p, ox, oy, x, y);
+      break;
+    case "rug":
+      rug(p, map, ox, oy, x, y);
+      break;
+    case "wall":
+      wall(p, map, ox, oy, x, y);
+      break;
+    case "exit":
+      exit(p, ox, oy, x, y);
+      break;
+  }
+}
+
 /** The whole map's ground as one canvas; scenery and people are drawn over it every frame. */
 export function bakeGround(map: GameMap): HTMLCanvasElement {
   return bake(map.width * TILE, map.height * TILE, (p) => {
     for (let y = map.y0; y < map.y0 + map.height; y++)
-      for (let x = map.x0; x < map.x0 + map.width; x++) {
-        const ox = (x - map.x0) * TILE;
-        const oy = (y - map.y0) * TILE;
-        switch (groundAt(map, x, y)) {
-          case "grass":
-            grass(p, ox, oy, x, y);
-            break;
-          case "flowers":
-            flowers(p, ox, oy, x, y);
-            break;
-          case "path":
-            speckle(p, ox, oy, x, y, C.path, C.pathDark, C.pathLight);
-            break;
-          case "plaza":
-            plaza(p, ox, oy, x, y);
-            break;
-          case "water":
-            water(p, map, ox, oy, x, y);
-            break;
-          case "floor":
-            floor(p, ox, oy, x, y);
-            break;
-          case "rug":
-            rug(p, map, ox, oy, x, y);
-            break;
-          case "wall":
-            wall(p, map, ox, oy, x, y);
-            break;
-          case "exit":
-            exit(p, ox, oy, x, y);
-            break;
-        }
-      }
+      for (let x = map.x0; x < map.x0 + map.width; x++) paintTile(p, map, x, y);
   });
+}
+
+/** Paints just these tiles again, on a ground baked for the same map before a drop came or went. */
+export function repaintGround(canvas: HTMLCanvasElement, map: GameMap, tiles: [number, number][]): void {
+  const p = new Pen(canvas.getContext("2d")!);
+  for (const [x, y] of tiles) {
+    if (!map.contains(x, y)) continue;
+    p.g.clearRect((x - map.x0) * TILE, (y - map.y0) * TILE, TILE, TILE);
+    paintTile(p, map, x, y);
+  }
 }
 
 /** Moving glints on water, drawn per frame on top of the baked ground. */

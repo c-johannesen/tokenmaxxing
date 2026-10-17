@@ -126,6 +126,17 @@ describe("drops", () => {
     setDrops("inn", []);
   });
 
+  test("a parcel coming or going keeps the map; furniture makes a new one", () => {
+    setDrops("inn", [drop(1, "furn.s", 3, 3)]);
+    const map = mapOf("inn");
+    setDrops("inn", [drop(1, "furn.s", 3, 3), drop(2, "hat.1", 8, 3)]);
+    expect(mapOf("inn")).toBe(map);
+    setDrops("inn", [drop(1, "furn.s", 3, 3), drop(2, "hat.1", 8, 3), drop(3, "furn.p", 5, 3)]);
+    expect(mapOf("inn")).not.toBe(map);
+    expect(mapOf("inn").at(5, 3)).toBe("p");
+    setDrops("inn", []);
+  });
+
   test("a room's own map changing shows through, drops and all", () => {
     setDrops("hq:77", [drop(1, "furn.d", 2, 4, "hq:77")]);
     expect(mapOf("hq:77").at(2, 4)).toBe("d");
