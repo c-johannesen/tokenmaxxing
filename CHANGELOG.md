@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.5.0](https://github.com/HansKristoffer/tokenmaxxing/compare/v1.4.2...v1.5.0) (2026-10-16)
+
+
+### Features
+
+* **sync:** count Grok Bot separately and discover Codex rollouts ([9bbf6ed](https://github.com/HansKristoffer/tokenmaxxing/commit/9bbf6ed562ef68e81603ff47a6bb6da4c098bc35))
+* **web:** XP bar on the player card, and three levels before Singularity ([2791fad](https://github.com/HansKristoffer/tokenmaxxing/commit/2791fad166e9b04223d73dbaf6711f71f0428404))
+* **web:** XP bar on the player card, and three levels before Singularity ([251964b](https://github.com/HansKristoffer/tokenmaxxing/commit/251964b26d683f1f2e59d7d8986c1cef602de203))
+
 ## [1.4.2](https://github.com/HansKristoffer/tokenmaxxing/compare/v1.4.1...v1.4.2) (2026-10-05)
 
 

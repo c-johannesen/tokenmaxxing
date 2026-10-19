@@ -1,6 +1,6 @@
 {
   "name": "tokenmaxxing",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "packageManager": "bun@1.4.2",
   "private": true,
   "description": "A tiny pixel town for people who run AI coding agents, with a macOS menu bar app that syncs your token usage",

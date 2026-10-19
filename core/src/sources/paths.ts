@@ -27,6 +27,14 @@ export function claudeCoworkDir(): string {
   return resolveDir(process.env.TOKENMAXXING_CLAUDE_COWORK_DIR, join(appSupport(), "Claude"));
 }
 
+/** PostHog Desktop's data dir. Its agent runs Claude Code with `claude/` as the config dir. */
+export function posthogDesktopDir(): string {
+  return resolveDir(
+    process.env.TOKENMAXXING_POSTHOG_DESKTOP_DIR,
+    join(appSupport(), "@posthog", "posthog-code"),
+  );
+}
+
 const codexHome = () => resolveDir(process.env.CODEX_HOME, join(homedir(), ".codex"));
 
 export function cursorStateDbPath(): string {
@@ -53,9 +61,14 @@ async function scanGlob(cwd: string, pattern: string, dot = false): Promise<stri
   return out;
 }
 
-/** Includes `<session>/subagents/agent-*.jsonl`, so subagents are parsed too. */
-export function listClaudeCodeFiles(): Promise<string[]> {
-  return scanGlob(claudeCodeProjectsDir(), "**/*.jsonl");
+/**
+ * Includes `<session>/subagents/agent-*.jsonl`, so subagents are parsed too. PostHog Desktop's
+ * sessions are Claude Code sessions in their own config dir, so they count as Claude Code.
+ */
+export async function listClaudeCodeFiles(): Promise<string[]> {
+  const dirs = [claudeCodeProjectsDir(), join(posthogDesktopDir(), "claude", "projects")];
+  const groups = await Promise.all([...new Set(dirs)].map((dir) => scanGlob(dir, "**/*.jsonl")));
+  return groups.flat();
 }
 
 /** Scoped to the session roots so the scan never descends into the multi-GB `vm_bundles/`. */
@@ -80,20 +93,29 @@ export async function listClaudeCoworkFiles(): Promise<string[]> {
  */
 export async function listCodexFiles(): Promise<string[]> {
   const home = codexHome();
-  const [live, archived, indexed] = await Promise.all([
+  const [live, archived, indexed, posthog] = await Promise.all([
     scanGlob(join(home, "sessions"), "**/*.jsonl"),
     scanGlob(join(home, "archived_sessions"), "**/*.jsonl"),
     listCodexIndexedRollouts(home),
+    listPosthogDesktopCodexFiles(),
   ]);
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const path of [...live, ...archived, ...indexed]) {
+  for (const path of [...live, ...archived, ...indexed, ...posthog]) {
     const key = canonical(path) ?? path;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(key);
   }
   return out;
+}
+
+/**
+ * PostHog Desktop gives each Codex task run on its gateway a `codex-home/<taskRunId>` of its own, and
+ * keeps only `sessions/` when the run ends. A run on the user's own ChatGPT login uses `~/.codex`.
+ */
+function listPosthogDesktopCodexFiles(): Promise<string[]> {
+  return scanGlob(join(posthogDesktopDir(), "codex-home"), "*/sessions/**/*.jsonl");
 }
 
 /** Codex state catalogs. `CODEX_SQLITE_HOME` can put them beside `CODEX_HOME`. */

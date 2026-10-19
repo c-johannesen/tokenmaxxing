@@ -8,6 +8,15 @@ import { healthCheck } from "./health.ts";
 import { installScript } from "./install.ts";
 import { rivetProxy } from "./proxy.ts";
 
+// Once startup is done, Bun exits on any unhandled rejection: one missed `.catch` would take the
+// whole town down. Log it loudly and keep going. A throw may have stopped synchronous code halfway,
+// so that one still exits (and Railway restarts the server).
+process.on("unhandledRejection", (err) => console.error("[unhandledRejection]", err));
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err);
+  process.exit(1);
+});
+
 const config = loadConfig(process.env, pkg.version);
 // RivetKit's native side reads this from the real environment, so it has to be set before
 // the process starts (Dockerfile, `bun run dev`); assigning process.env here is too late.
@@ -53,6 +62,16 @@ const localClient = createClient<typeof registry>({
   token: ENGINE_TOKEN,
 });
 const health = healthCheck(() => main(localClient).town.health(), config.version);
+
+// If the engine dies, every actor stops but this process stays up, so Railway never restarts it.
+// Unhealthy for two minutes: exit.
+let unhealthy = 0;
+setInterval(async () => {
+  unhealthy = (await health()).ok ? 0 : unhealthy + 1;
+  if (unhealthy < 4) return;
+  console.error("[tokenmaxxing] unhealthy for 2 minutes, exiting");
+  process.exit(1);
+}, 30_000);
 
 const headersFor = (page: Page, req: Request, extra: Record<string, string>) => ({
   ...pageHeaders(page, new URL(req.url).host, !config.development),
@@ -105,21 +124,3 @@ const server = Bun.serve({
 console.log(
   `[tokenmaxxing] v${config.version} listening on ${server.url} (data: ${storage ?? "~/.rivetkit"})`,
 );
-
-// Past the top-level awaits, Bun exits on an unhandled rejection: one stray promise isn't worth the
-// whole server. A thrown exception may have left something halfway, so that one still exits.
-process.on("unhandledRejection", (err) => console.error("[unhandledRejection]", err));
-process.on("uncaughtException", (err) => {
-  console.error("[uncaughtException]", err);
-  process.exit(1);
-});
-
-// A dead engine never comes back while this process lives: exit after two minutes unhealthy, and
-// Railway (ON_FAILURE) starts both again.
-let unhealthy = 0;
-setInterval(async () => {
-  unhealthy = (await health()).ok ? 0 : unhealthy + 1;
-  if (unhealthy < 4) return;
-  console.error("[tokenmaxxing] unhealthy for 2 minutes, exiting");
-  process.exit(1);
-}, 30_000);

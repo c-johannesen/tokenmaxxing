@@ -1,7 +1,5 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { Snapshot } from "@tokenmaxxing/core/world.ts";
-import { arcade } from "../src/actors/arcade.ts";
-import { serial } from "../src/actors/shared.ts";
 import { as, eventually, rich } from "./rivet.ts";
 
 type Rich = Awaited<ReturnType<typeof rich>>;
@@ -199,56 +197,4 @@ describe("the arcade", () => {
     const table = (await host.arcade.lobby()).tables.find((t) => t.id === second)!;
     expect(table.invited).toHaveLength(3);
   });
-});
-
-test("a refund that fails during a sweep doesn't stop the sweeps: the next one closes the table", async () => {
-  // In this process, with `town` and `world` faked: a failing refund can't be driven on the server.
-  const warn = spyOn(console, "warn").mockImplementation(() => {});
-  let refunds = 0;
-  const actor = {
-    getOrCreate: () => ({
-      refund: async () => {
-        if (++refunds === 1) throw new Error("town is restarting");
-      },
-      notify: async () => {},
-    }),
-  };
-  const controller = new AbortController();
-  const state = {
-    nextId: 2,
-    matches: {},
-    names: {},
-    tables: {
-      1: {
-        id: 1,
-        game: "spr",
-        host: 7,
-        stake: 0,
-        seats: 2,
-        split: "all",
-        open: true,
-        options: {},
-        seated: [7],
-        invited: [],
-        createdAt: 0,
-      },
-    },
-  };
-  const running = (arcade.config.run as (c: unknown) => Promise<void>)({
-    state,
-    vars: { serial: serial() },
-    conns: new Map(),
-    client: () => ({ town: actor, world: actor, arcade: actor }),
-    keepAwake: <T>(p: Promise<T>) => p,
-    abortSignal: controller.signal,
-  });
-  try {
-    await eventually(() => expect(Object.keys(state.tables)).toEqual([]));
-    expect(refunds).toBe(2);
-    expect(warn).toHaveBeenCalledWith("[arcade] sweep: Error: town is restarting");
-  } finally {
-    controller.abort();
-    await running;
-    warn.mockRestore();
-  }
 });

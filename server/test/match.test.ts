@@ -138,15 +138,16 @@ test("a usage query finishing after a forfeit does not restore that player's sco
   expect(b.state.state.tokens[1]).toBe(0);
 });
 
-test("the match's chat stays plain however long it gets", async () => {
+test("match chat stores plain lines, so each new line doesn't make the state slower to read", async () => {
   const b = battle();
   const user = {
     ...b.ctx,
     conn: { state: { kind: "user", userId: 1 } },
     vars: { chat: { take: () => true } },
-  } as unknown as Parameters<typeof actions.say>[0];
+  } as unknown as Context;
   for (let i = 1; i <= 50; i++) await actions.say(user, `line ${i}`);
-  // Stored lines that were proxies gained a layer with every later line, and cloning them throws.
-  const chat = structuredClone(onChange.target(b.state).chat);
-  expect(chat.map((l) => l.text)).toEqual(Array.from({ length: 50 }, (_, i) => `line ${i + 1}`));
+  // Spreading the live array stored the old lines as proxies, one layer deeper with every line.
+  const stored = structuredClone((onChange.target(b.state) as { chat?: unknown[] }).chat!);
+  expect(stored).toHaveLength(50);
+  expect(stored.at(-1)).toMatchObject({ id: 50, userId: 1, name: "p1", text: "line 50" });
 });

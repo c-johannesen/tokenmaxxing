@@ -1241,7 +1241,9 @@ describe("listCodexFiles", () => {
   async function withHome(home: string, fn: () => Promise<void>, sqliteHome?: string) {
     const prev = process.env.CODEX_HOME;
     const prevSqlite = process.env.CODEX_SQLITE_HOME;
+    const prevPosthog = process.env.TOKENMAXXING_POSTHOG_DESKTOP_DIR;
     process.env.CODEX_HOME = home;
+    process.env.TOKENMAXXING_POSTHOG_DESKTOP_DIR = join(home, "no-posthog");
     if (sqliteHome === undefined) delete process.env.CODEX_SQLITE_HOME;
     else process.env.CODEX_SQLITE_HOME = sqliteHome;
     try {
@@ -1251,6 +1253,8 @@ describe("listCodexFiles", () => {
       else process.env.CODEX_HOME = prev;
       if (prevSqlite === undefined) delete process.env.CODEX_SQLITE_HOME;
       else process.env.CODEX_SQLITE_HOME = prevSqlite;
+      if (prevPosthog === undefined) delete process.env.TOKENMAXXING_POSTHOG_DESKTOP_DIR;
+      else process.env.TOKENMAXXING_POSTHOG_DESKTOP_DIR = prevPosthog;
     }
   }
 

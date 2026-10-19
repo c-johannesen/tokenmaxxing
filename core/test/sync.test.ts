@@ -23,11 +23,13 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "tm-sync-"));
   statePath = join(dir, "state", "state.json");
   process.env.CLAUDE_CONFIG_DIR = join(dir, "claude");
+  process.env.TOKENMAXXING_POSTHOG_DESKTOP_DIR = join(dir, "posthog");
   await mkdir(join(dir, "claude", "projects", "p"), { recursive: true });
 });
 
 afterEach(async () => {
   delete process.env.CLAUDE_CONFIG_DIR;
+  delete process.env.TOKENMAXXING_POSTHOG_DESKTOP_DIR;
   await rm(dir, { recursive: true, force: true });
 });
 

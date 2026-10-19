@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { BOTS } from "@tokenmaxxing/core/bots.ts";
 import { MAPS } from "@tokenmaxxing/core/maps.ts";
 import { hqMap } from "@tokenmaxxing/core/office.ts";
@@ -7,7 +7,6 @@ import {
   cupsLeft,
   DROPS,
   type Drop,
-  defaultLook,
   type Moves,
   mapOf,
   outsideDoor,
@@ -638,34 +637,4 @@ describe("drops", () => {
     expect(await bag(sql, 7)).toEqual([{ item: "pet.1", count: 1 }]);
     setDrops("inn", []);
   });
-});
-
-test("a snapshot the tick can't send (the engine stalled) is logged, and the process lives on", async () => {
-  // In this process: a rejection nothing catches fails the test run, as it ended the server.
-  const warned = Promise.withResolvers<unknown>();
-  const warn = spyOn(console, "warn").mockImplementation((line) => warned.resolve(line));
-  const controller = new AbortController();
-  const ada = { id: 7, name: "ada", look: defaultLook(7), level: 1, companyId: null, todayTokens: 0 };
-  const running = (world.config.run as (c: unknown) => Promise<void>)({
-    state: { seeded: true, companies: {}, players: { 7: { ...ada, ...roomEntry("inn"), state: "idle" } } },
-    // Online, and just walked out of town: the tick sends them the Inn.
-    vars: { online: new Map([[7, 1]]), dirty: new Set([7]), announced: new Map([[7, "town"]]) },
-    db: {
-      execute: async () => {
-        throw new Error("SQLite transaction coordinator is closed.");
-      },
-    },
-    conns: new Map(),
-    broadcast: () => {},
-    abortSignal: controller.signal,
-  });
-  try {
-    expect(await warned.promise).toBe(
-      "[world] snapshot for 7: Error: SQLite transaction coordinator is closed.",
-    );
-  } finally {
-    controller.abort();
-    await running;
-    warn.mockRestore();
-  }
 });

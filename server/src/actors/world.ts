@@ -598,7 +598,7 @@ export const world = actor({
       c.vars.dirty.delete(userId);
       for (const conn of c.conns.values()) {
         const s = conn.state as ConnState;
-        if (s.kind === "user" && s.userId === userId) conn.disconnect("deleted").catch(() => {}); // already gone
+        if (s.kind === "user" && s.userId === userId) conn.disconnect("deleted").catch(() => {});
       }
       if (p.companyId !== null) ids.push(...(await rebuildHq(c, p.companyId)));
       return ids;
@@ -1232,7 +1232,7 @@ function flush(c: Sender & { vars: Vars; db: Sql; broadcast(name: string, ...arg
       if (was) at(was).leave.push(id);
       at(p.room).join.push(view(p, online.has(id)));
       announced.set(id, p.room);
-      // Caught: nothing awaits it, and a failed chat read (the engine stalling) would end the process.
+      // Nothing awaits it: an uncaught rejection here (the database closing) would end the process.
       if (online.has(id))
         sendSnapshot(c, p).catch((err) => console.warn(`[world] snapshot for ${id}: ${String(err)}`));
     }

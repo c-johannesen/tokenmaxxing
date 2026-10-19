@@ -181,7 +181,7 @@ export const match = actor({
         c.state.players.find((p) => p.userId === userId)?.name ??
         (await main(c.client()).town.names([userId]))[userId] ??
         "?";
-      // From a plain copy: spreading the live array stores proxies, a layer deeper with every line.
+      // From a plain copy: spreading the live array would wrap the old lines in one more proxy each time.
       const chat = plain(c.state).chat ?? [];
       const line: MatchChatLine = { id: (chat.at(-1)?.id ?? 0) + 1, userId, name, text, at: Date.now() };
       c.state.chat = [...chat, line].slice(-CHAT_HISTORY);
