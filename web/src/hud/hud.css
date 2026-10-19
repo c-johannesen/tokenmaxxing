@@ -631,6 +631,7 @@ input:focus {
 .members li {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   padding: 3px 0;
 }
 
