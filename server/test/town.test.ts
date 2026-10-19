@@ -356,10 +356,12 @@ describe("trades", () => {
     await ada.town.offerTrade(bo.userId, { coins: 0, items: ["hat.1"] }, coins(50));
     const offer = (await bo.town.trades()).incoming[0]!;
     expect(offer).toMatchObject({ from: ada.name, to: bo.name, want: coins(50) });
+    // Both see the trades icon until it settles.
+    expect((await ada.town.wallet()).trading && (await bo.town.wallet()).trading).toBe(true);
     const after = await bo.town.acceptTrade(ada.userId, offer.at);
-    expect(after).toMatchObject({ balance: 950, owned: ["hat.1"] });
+    expect(after).toMatchObject({ balance: 950, owned: ["hat.1"], trading: false });
     expect((await ada.town.me()).look.hat).toBe(0);
-    expect(await ada.town.wallet()).toMatchObject({ balance: 900 + 50, owned: [] });
+    expect(await ada.town.wallet()).toMatchObject({ balance: 900 + 50, owned: [], trading: false });
     await bo.town.setLook({ ...(await bo.town.me()).look, hat: 1 });
     expect(await bo.town.trades()).toEqual({ incoming: [], outgoing: null });
     // A settled trade isn't a game in progress: ada can still be deleted, and her open offer goes too.

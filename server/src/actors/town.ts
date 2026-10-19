@@ -70,6 +70,7 @@ import {
   refund,
   setBalance,
   settleTrade,
+  TRADE_TTL,
   type Trade,
   takeOut,
   tradesWhere,
@@ -180,8 +181,6 @@ const ROOM_CHANGES_PER_MIN = 30;
 const RENAMES_PER_HOUR = 10;
 const MIN = 60_000;
 const HOUR = 3_600_000;
-/** Offers older than this are gone. */
-const TRADE_TTL = 7 * 24 * HOUR;
 /** Drops nobody took go back to their droppers after this; the sweeper looks every `SWEEP_MS`. */
 const DROP_TTL = HOUR;
 const SWEEP_MS = 10 * 60_000;

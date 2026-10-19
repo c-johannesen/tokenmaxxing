@@ -133,6 +133,17 @@ function Stats() {
       >
         🎒{wallet && ` ${wallet.items}`}
       </button>
+      {wallet?.trading && (
+        <button
+          type="button"
+          className="icon"
+          title="Trades"
+          aria-label="Trades: an offer is open"
+          onClick={() => hud.set({ panel: { kind: "trades" } })}
+        >
+          🔁
+        </button>
+      )}
       <button
         type="button"
         className="icon"

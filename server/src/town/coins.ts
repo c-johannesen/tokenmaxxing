@@ -28,6 +28,8 @@ export interface Wallet {
   items: number;
   /** Today's quests, and which are done so far. */
   quests: { id: string; text: string; coins: number; done: boolean }[];
+  /** An offer is open to or from me: the HUD shows the trades icon. */
+  trading: boolean;
 }
 
 /** One kind in a bag, and how many. */
@@ -120,6 +122,13 @@ export async function wallet(sql: Sql, userId: number, now: number, top?: Podium
     owned: await ownedItems(sql, userId),
     items: (await one<{ n: number }>(sql, "SELECT COUNT(*) AS n FROM items WHERE owner_id = ?", userId))!.n,
     quests: QUESTS.map(({ done, ...q }) => ({ ...q, done: done(todays) })),
+    trading: !!(await one(
+      sql,
+      "SELECT 1 FROM trades WHERE (from_id = ? OR to_id = ?) AND at >= ? LIMIT 1",
+      userId,
+      userId,
+      now - TRADE_TTL,
+    )),
   };
 }
 
@@ -407,6 +416,9 @@ export interface Trade {
   want: Side;
   at: number;
 }
+
+/** Offers older than this are gone. */
+export const TRADE_TTL = 7 * 24 * 3_600_000;
 
 /** Both ways a trade goes. */
 const directions = (t: Trade) => [

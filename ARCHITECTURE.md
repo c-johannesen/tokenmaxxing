@@ -254,7 +254,7 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   furniture on a floor (pick it up first). Accepting re-checks both sides under `serial` and moves everything in one
   transaction (`settleTrade`): coins through the `ledger` (kind `trade`), items by moving one row of each kind
   to the receiver. Spend stays in `purchases`, so balances don't change. A kind you no longer hold comes off
-  your look.
+  your look. While an offer is open to or from you, a 🔁 beside the Bag opens your trades (`wallet.trading`).
 - **Offices.** From level 10, every company member has one behind a door with their name on it in the
   company building (`office:<userId>`, one map template plus their furniture). The doors are in hallways of
   10 above the building's floor (negative `y`, `hqMap`), which `world` rebuilds when a door comes or goes.

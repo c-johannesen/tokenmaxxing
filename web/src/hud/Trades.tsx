@@ -45,6 +45,7 @@ export function TradePanel({ userId }: { userId: number }) {
     setSent(false);
     await town.offerTrade(userId, give, want);
     setSent(true);
+    hud.set({ wallet: await town.wallet() });
   });
   return (
     <Modal title={`🔁 Trade with ${them.name}`}>
@@ -141,13 +142,15 @@ export function TradesPanel() {
     const id = setInterval(() => void town.trades().then(setList, () => {}), 10_000);
     return () => clearInterval(id);
   }, []);
-  // Whatever happened, show what's open now.
+  // Whatever happened, show what's open now, and whether the trades icon stays.
   const run = (fn: () => Promise<unknown>) =>
     call(async () => {
       try {
         await fn();
       } finally {
-        setList(await town.trades());
+        const [open, wallet] = await Promise.all([town.trades(), town.wallet()]);
+        setList(open);
+        hud.set({ wallet });
       }
     });
   if (!list) return <Modal title="🔁 Trades">Loading…</Modal>;
@@ -172,8 +175,10 @@ export function TradesPanel() {
                     type="button"
                     className="primary"
                     onClick={run(async () => {
-                      hud.set({ wallet: await town.acceptTrade(t.fromId, t.at) });
+                      await town.acceptTrade(t.fromId, t.at);
                       await refreshMe();
+                      // What came in, rather than a list that's likely empty now.
+                      hud.set({ panel: { kind: "bag" } });
                     })}
                   >
                     Accept
