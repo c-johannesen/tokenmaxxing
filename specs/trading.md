@@ -105,7 +105,8 @@ open the right panel (`web/src/hud/Hud.tsx:240` opens `company` on every click t
   and errors.
 - `web/src/hud/TradesPanel.tsx`, `{ kind: "trades" }`: my incoming offers, each with both sides spelled
   out (`🪙 50 + Shades  ⇄  Duck`) and Accept / Decline; my outgoing with Withdraw. Opened from the toast,
-  and a `🔁 Trades` line in the menu panel.
+  a `🔁 Trades` line in the menu panel, and a `🔁` icon beside the Bag while an offer is open to or from me
+  (`wallet.trading`).
 - `Panel` in `web/src/store.ts` gains both kinds; the switch in `Hud.tsx:159` renders them.
 
 ## Tests
