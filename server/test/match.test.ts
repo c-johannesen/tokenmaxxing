@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createRequire } from "node:module";
 import { type TokenmaxxingState, tokenmaxxing } from "@tokenmaxxing/core/games/tokenmaxxing.ts";
-import type { Frame, MatchChatLine } from "@tokenmaxxing/core/games/wire.ts";
+import type { Frame } from "@tokenmaxxing/core/games/wire.ts";
 import { match } from "../src/actors/match.ts";
 
 // Use the same proxy version as RivetKit without making it a runtime dependency of our server.
@@ -43,7 +43,6 @@ function battle() {
       bets: {},
       forfeited: [] as number[],
       reported: false,
-      chat: [] as MatchChatLine[],
     },
     () => writes++,
   );

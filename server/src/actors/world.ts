@@ -1071,7 +1071,7 @@ async function snapshot(
     room,
     selfId: self.id,
     players: Object.values(s.players)
-      .filter((p) => p.room === room)
+      .filter((p) => p.room === self.room)
       .map((p) => view(p, online.has(p.id))),
     companies: Object.values(s.companies),
     occupancy: occupancy(s, online),
