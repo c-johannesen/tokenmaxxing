@@ -81,6 +81,26 @@ describe("companies", () => {
     expect(other.members.map((m) => m.name)).toEqual([mate.name]);
   });
 
+  test("everyone leaving at once closes it in the world too", async () => {
+    // Enough of them that, pushed out of order, one closed company used to stay standing.
+    const ids: number[] = [];
+    const people = [];
+    for (let i = 0; i < 15; i++) {
+      const owner = await signUp("lv");
+      const co = await owner.town.createCompany(`Leavers ${i}`);
+      people.push(owner);
+      for (const mate of [await signUp("lv"), await signUp("lv")]) {
+        await mate.town.apply(co.id);
+        await owner.town.approve(mate.userId);
+        people.push(mate);
+      }
+      ids.push(co.id);
+    }
+    await Promise.all(people.map((u) => u.town.leaveCompany()));
+    const town = await as(people[0]!.token).world.join();
+    expect(town.companies.filter((co) => ids.includes(co.id))).toEqual([]);
+  });
+
   test("declining, withdrawing, and one application at a time", async () => {
     const a = await signUp("dec");
     const b = await signUp("dec");
